@@ -1,0 +1,11 @@
+{
+  "clip_id": "string",
+  "start": "number",
+  "end": "number",
+  "type": "string",
+  "features": {
+    "hook_strength": "number",
+    "novelty": "number",
+    "clarity": "number"
+  }
+}

@@ -1,0 +1,206 @@
+week: 4
+theme: "Packaging, UI und Export"
+goal: "Aus den Top-Kandidaten veröffentlichbare Short-Clips machen."
+product_note: >
+  Ende von Woche 4 = echtes MVP. Das System ist fertig, wenn diese User Story funktioniert:
+  Ich lade ein 10–30 Minuten langes Video hoch, bekomme automatisch eine Liste der besten 10
+  Short-Kandidaten mit Begründung und kann 2–3 davon direkt als 9:16 Clip mit Untertiteln exportieren.
+
+deliverables:
+  - einfache Web-Oberfläche (Next.js oder React)
+  - Top-10 Ansicht
+  - Clip-Detailansicht mit Preview
+  - Subtitle-Rendering (eingebrannt)
+  - 9:16 Export als MP4
+  - Titel-/Overlay-Varianten
+  - User-Feedback (gut / schlecht / exportieren)
+  - Stabilisierung und End-to-End-Test
+  - nutzbares lokales MVP
+
+tasks:
+  - id: w4-t1
+    name: "Minimales Frontend bauen"
+    days: [22, 23]
+    priority: critical
+    description: >
+      Schlichtes Next.js- oder React-Frontend. Kein Design-Aufwand — Funktion vor Form.
+      Swagger bleibt als Fallback erhalten.
+    views:
+      - name: Upload-Seite
+        description: "Datei-Upload, Start-Button, Statusanzeige"
+      - name: Video-Status
+        description: "Job-State anzeigen (uploaded → transcribed → ranked), Fortschrittsanzeige"
+      - name: Kandidatenliste
+        description: "Alle Kandidaten mit Start/Ende, Typ, Transcript-Preview"
+      - name: Ranking-Ansicht
+        description: "Top-10 mit viral_score, Scores, Gründe-Tags"
+      - name: Clip-Detailansicht
+        description: "Preview-Video, alle Scores, Gründe, Export-Button, Feedback-Buttons"
+    notes: "Kein Perfektionismus beim Design. Funktioniert > hübsch."
+
+  - id: w4-t2
+    name: "Packaging Engine v1 bauen"
+    days: [24, 25]
+    priority: critical
+    description: >
+      Kern der Woche: Top-Clips in exportierbare 9:16 Shorts umwandeln.
+      Alles mit ffmpeg umsetzen — kein komplexes Rendering-Framework.
+    steps:
+      - Auto-Crop auf 9:16 (Gesichts-/Mittelpunkt-basiert, Fallback: centered crop)
+      - Untertitel einbrennen (aus transcript_segments, SRT-Format als Zwischenschritt)
+      - wichtige Wörter hervorheben (Hook-Wörter fett oder farbig)
+      - optional: Hook-Overlay-Text in ersten 2–3 Sekunden einblenden
+      - Titelvarianten aus Hook-Text generieren (regelbasiert)
+    ffmpeg_operations:
+      - "crop + scale auf 1080x1920"
+      - "subtitles filter für eingebrannte Untertitel"
+      - "drawtext filter für Overlay"
+    notes: "Simpel halten. Kein After Effects, kein Remotion. ffmpeg reicht vollständig."
+
+  - id: w4-t3
+    name: "Export-Service implementieren"
+    days: [24, 25]
+    priority: critical
+    description: >
+      Pro Top-Clip vollständigen Export-Artefakt-Satz erzeugen und in DB verwalten.
+    output_per_clip:
+      - "MP4 (9:16, 1080x1920) unter /storage/exports/{video_id}/{candidate_id}.mp4"
+      - "Titelvorschläge als JSON (3 Varianten)"
+      - "Overlay-Text (Hook-Zeile)"
+      - "Subtitle-Datei optional (.srt)"
+    endpoints:
+      - method: POST
+        path: "/videos/{id}/candidates/{candidate_id}/export"
+        description: "Export für einen Kandidaten anstoßen"
+      - method: GET
+        path: "/videos/{id}/exports"
+        description: "Alle Export-Artefakte eines Videos abrufen"
+    new_tables:
+      - name: clip_variants
+        columns:
+          - candidate_id
+          - variant_type (export | preview)
+          - file_path
+          - resolution
+          - title_suggestions (JSONB)
+          - overlay_text
+          - subtitle_path (nullable)
+          - created_at
+
+  - id: w4-t4
+    name: "Clip-Preview erzeugen"
+    days: [26]
+    priority: high
+    description: >
+      Niedrig aufgelöste Preview-Dateien für Top-Kandidaten generieren,
+      damit die UI schnell bleibt und kein Full-Export nötig ist zum Ansehen.
+    spec:
+      resolution: "480x854 (9:16, niedrig)"
+      format: "MP4 oder WebM"
+      storage: "/storage/previews/{video_id}/{candidate_id}_preview.mp4"
+      trigger: "automatisch nach Ranking für Top-10"
+    notes: "Preview ohne Untertitel ist ausreichend. Nur für schnelle UI-Ansicht."
+
+  - id: w4-t5
+    name: "User-Feedback implementieren"
+    days: [26]
+    priority: high
+    description: >
+      Minimales Feedback-System — drei Buttons reichen. Daten für späteres Retraining sammeln.
+    feedback_actions:
+      - label: "gut"
+        value: positive
+        description: "Clip war ein guter Vorschlag"
+      - label: "schlecht"
+        value: negative
+        description: "Clip war kein guter Vorschlag"
+      - label: "exportieren"
+        value: exported
+        description: "User hat sich entschieden, diesen Clip zu exportieren"
+    endpoints:
+      - method: POST
+        path: "/videos/{id}/candidates/{candidate_id}/feedback"
+        body: "{ action: 'positive' | 'negative' | 'exported' }"
+    new_tables:
+      - name: clip_feedback
+        columns:
+          - candidate_id
+          - video_id
+          - action (positive | negative | exported)
+          - created_at
+    notes: "Feedback wird gespeichert aber in Woche 4 noch nicht für Retraining genutzt."
+
+  - id: w4-t6
+    name: "Stabilisierung"
+    days: [27, 28]
+    priority: critical
+    description: >
+      Bewusst 2 Tage für Robustheit reserviert. Kein neues Feature.
+      Das System muss End-to-End zuverlässig laufen.
+    focus_areas:
+      - name: Bugfixing
+        description: "Alle bekannten Fehler aus den Wochen 1–4 beheben"
+      - name: Speicherbereinigung
+        description: "Temporäre Dateien löschen, Storage-Struktur validieren"
+      - name: Job-Retry
+        description: "Fehlgeschlagene Jobs automatisch neu starten (max. 3 Versuche)"
+      - name: Logging
+        description: "Strukturiertes Logging in allen Services (JSON-Format)"
+      - name: Fehlerfälle
+        description: "Ungültige Videodateien, leere Transkripte, fehlende Features abfangen"
+      - name: GPU-Lock-Probleme
+        description: "WhisperX-Prozess korrekt beenden, GPU-Speicher freigeben"
+      - name: Timeouts
+        description: "Timeouts für Ingestion, ASR und Packaging definieren und behandeln"
+    end_to_end_test:
+      description: "Vollständigen Durchlauf mit 2–3 eigenen Videos machen"
+      steps:
+        - Video hochladen
+        - Pipeline vollständig durchlaufen lassen
+        - Top-10 in UI ansehen
+        - mindestens 1 Clip exportieren
+        - MP4 auf dem lokalen Rechner abspielen
+
+acceptance_criteria:
+  - "Ich lade ein Video hoch."
+  - "Das System analysiert es vollständig (Upload → Transkription → Kandidaten → Ranking)."
+  - "Ich sehe die Top-Clips in einer UI mit Scores und Gründen."
+  - "Ich exportiere einen 9:16 Short mit eingebrannten Untertiteln."
+  - "Ich kann erste echte Tests mit eigenen Videos machen."
+
+daily_focus:
+  day_22_23: "Frontend minimal (alle 5 Views funktionsfähig)"
+  day_24_25: "Subtitle-Rendering + 9:16 Export"
+  day_26:    "Titel-/Overlay-Varianten + Preview + Feedback"
+  day_27:    "Stabilisierung + Bugfixing"
+  day_28:    "End-to-End Test mit echten Videos"
+
+cutscope_priority:
+  can_drop_if_time_runs_out:
+    - hübsches Frontend-Design
+    - ausgefeilte Titelgenerierung
+    - Subtitle-Datei (.srt) als separater Download
+    - Preview-Generierung (Full-Export als Fallback)
+  must_not_drop:
+    - Export (MP4 9:16)
+    - Subtitle-Einbrennen
+    - Feedback-Buttons (Datenerfassung für Post-MVP)
+    - End-to-End Stabilisierung
+
+new_db_tables:
+  - clip_variants
+  - clip_feedback
+
+post_mvp_next_steps:
+  - 10–20 eigene Videos durchjagen
+  - manuell bewerten welche Vorschläge wirklich gut waren
+  - false positives notieren
+  - häufige Fehler clustern
+  - daraus Woche-5/6-Backlog bauen (erst dann lohnt Feintuning)
+
+out_of_scope:
+  - Publish-Integration (kein direktes Upload zu YouTube/TikTok)
+  - Multi-User
+  - automatisches Retraining
+  - komplexe Agentik
+  - Diarization

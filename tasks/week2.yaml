@@ -1,0 +1,176 @@
+week: 2
+theme: "Segmentierung und Candidate Generation"
+goal: "Aus dem Transkript und der Videostruktur automatisch sinnvolle Clip-Kandidaten erzeugen."
+
+deliverables:
+  - Shot Detection
+  - semantische Segmentierung
+  - Candidate Generator
+  - Kandidaten in DB
+  - erste API für Kandidatenliste
+
+tasks:
+  - id: w2-t1
+    name: "Shot Detection integrieren"
+    days: [8, 9]
+    priority: critical
+    description: >
+      CPU-seitige Shot Detection integrieren. Shot Boundaries als Grundlage
+      für Segmentgrenzen und späteres Kandidaten-Trimming nutzen.
+    steps:
+      - PySceneDetect (oder vergleichbares Werkzeug) integrieren
+      - Shot Boundaries mit Timestamp und Frame-Index speichern
+      - optional: Keyframe je Shot extrahieren und unter /storage/videos/{video_id}/keyframes/ ablegen
+      - Job-Status erweitern: nach 'transcribed' → 'shots_detected'
+    new_tables:
+      - name: shots
+        columns:
+          - video_id
+          - shot_index
+          - start_time
+          - end_time
+          - keyframe_path (nullable)
+
+  - id: w2-t2
+    name: "Semantische Segmentierung bauen"
+    days: [10, 11]
+    priority: critical
+    description: >
+      Heuristisch + optional embedding-basiert. Kein komplexes Modell —
+      regelbasierte Segmentgrenzen reichen für Woche 2.
+    segmentation_rules:
+      - Segmentgrenze bei Themenwechsel (Keyword-Shift oder Embedding-Distanz)
+      - Segmentgrenze bei langen Pausen (> ~1.5s im Transkript)
+      - Segmentgrenze bei starken rhetorischen Triggern
+      - Segmentgrenze bevorzugt nahe Shot-Wechseln
+    new_tables:
+      - name: semantic_segments
+        columns:
+          - video_id
+          - segment_index
+          - start_time
+          - end_time
+          - trigger_type (pause | topic_shift | rhetorical | shot_aligned)
+          - transcript_preview
+    notes: "Embedding-Ansatz optional — erst regelbasiert starten, nur erweitern wenn nötig."
+
+  - id: w2-t3
+    name: "Rhetorische Marker-Bibliothek definieren"
+    days: [10, 11]
+    priority: high
+    description: >
+      Erste regelbasierte Muster-Bibliothek für rhetorische Trigger.
+      Zunächst als Keyword-/Pattern-Liste, keine ML-Klassifikation nötig.
+    marker_types:
+      - id: problem_intro
+        description: "Problem-Einstieg"
+        examples: ["die meisten machen Fehler", "das größte Problem ist"]
+      - id: contrast
+        description: "Kontrast / Aber-Struktur"
+        examples: ["aber die Wahrheit ist", "im Gegensatz dazu"]
+      - id: statistic
+        description: "Zahl / Statistik"
+        examples: ["X% der Menschen", "in einer Studie mit"]
+      - id: warning
+        description: "Warnung"
+        examples: ["pass auf", "das ist gefährlich", "Vorsicht"]
+      - id: controversy
+        description: "Kontroverse"
+        examples: ["niemand spricht darüber", "das will dir keiner sagen"]
+      - id: payoff
+        description: "Payoff / Ergebnis-Ankündigung"
+        examples: ["am Ende wirst du", "das Ergebnis war", "deswegen funktioniert"]
+    notes: "Liste ist erweiterbar. Für DE + EN pflegen."
+
+  - id: w2-t4
+    name: "Candidate Generator bauen"
+    days: [12, 13]
+    priority: critical
+    description: >
+      Kern-Task der Woche. Pro Video 30–100 Kandidaten aus Segmenten und
+      rhetorischen Markern generieren.
+    candidate_types:
+      - hook_to_payoff
+      - claim_to_explanation
+      - mistake_to_fix
+      - quick_lesson
+      - contrarian_snippet
+    generation_rules:
+      - "Dauer: 15–60 Sekunden"
+      - kein Satzanfang mitten im Wort (Wort-Timestamps nutzen)
+      - Hook möglichst in den ersten Sekunden platzieren
+      - Ende nicht mitten in einem Satz abschneiden
+      - Kandidaten aus Kombination von Segment-Grenzen + rhetorischen Markern ableiten
+    new_tables:
+      - name: clip_candidates
+        columns:
+          - video_id
+          - candidate_index
+          - start_time
+          - end_time
+          - duration
+          - candidate_type
+          - trigger_marker (nullable)
+          - transcript_preview
+          - status (active | dismissed)
+
+  - id: w2-t5
+    name: "Preview-Endpoint bauen"
+    days: [14]
+    priority: critical
+    description: >
+      API-Endpunkt, der Kandidatenliste für ein Video zurückgibt.
+    endpoints:
+      - method: GET
+        path: "/videos/{id}/candidates"
+        response:
+          - candidate_id
+          - start
+          - end
+          - duration
+          - candidate_type
+          - transcript_preview
+    notes: "Noch keine Scores — nur rohe Kandidaten mit Metadaten."
+
+  - id: w2-t6
+    name: "Review und manuelle Qualitätsprüfung"
+    days: [14]
+    priority: high
+    description: >
+      Kandidaten manuell durch ein eigenes Video prüfen.
+      Qualität bewerten: Sind die Grenzen sinnvoll? Decken die Typen das Videomaterial ab?
+    checklist:
+      - mindestens 30 Kandidaten pro Video
+      - kein Kandidat beginnt/endet mitten im Wort
+      - Kandidaten-Typen sind inhaltlich erkennbar unterschiedlich
+      - keine offensichtlich unsinnigen Grenzen (z.B. Stille, Übergänge)
+
+acceptance_criteria:
+  - "Das System hat zu einem transkribierten Video 30–100 Kandidaten erzeugt."
+  - "Jeder Kandidat hat Start/Ende und einen Candidate-Typ."
+  - "Ich kann Kandidaten per GET /videos/{id}/candidates abrufen."
+  - "Die Kandidaten sind nicht zufällig — rhetorische Marker und Segmentgrenzen sind erkennbar."
+
+daily_focus:
+  day_8_9:   "Shot Detection integrieren"
+  day_10_11: "Semantische Segmentierung + rhetorische Marker"
+  day_12_13: "Candidate Generator"
+  day_14:    "Candidate API + manuelle Review"
+
+technical_focus:
+  - brauchbare Kandidatenmenge wichtiger als Perfektion
+  - kein Deep Learning Overkill
+  - regelbasierter Ansatz ist ausreichend und bevorzugt
+
+new_db_tables:
+  - shots
+  - semantic_segments
+  - clip_candidates
+
+out_of_scope:
+  - Feature Extraction (kommt Woche 3)
+  - Scoring oder Ranking
+  - komplexe Embedding-Modelle
+  - Diarization
+  - LLM-gestützte Segment-Labels
+  - Frontend

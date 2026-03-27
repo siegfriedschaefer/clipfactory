@@ -1,0 +1,238 @@
+week: 3
+theme: "Feature Extraction, Scoring und Ranking"
+goal: "Das System soll Kandidaten bewerten und die besten Clips priorisieren."
+product_note: >
+  Woche 3 ist der eigentliche Produktkern.
+  Hier entsteht das Differenzierungsmerkmal: nicht nur schneiden, sondern bewerten.
+
+deliverables:
+  - Feature Extraction Layer (text, audio, video)
+  - erste Specialist Scores
+  - Meta-Ranking
+  - Top-10 Auswahl
+  - erste Erklärbarkeit pro Clip
+
+tasks:
+  - id: w3-t1
+    name: "Text-Features implementieren"
+    days: [15, 16]
+    priority: critical
+    description: >
+      Für jeden Kandidaten aus dem Transkript-Text berechenbare Features extrahieren.
+      Alle Features werden in clip_features gespeichert.
+    features:
+      - name: hook_strength
+        description: "Wie stark ist der Einstieg? Enthält rhetorischen Trigger oder Frage?"
+      - name: curiosity_gap
+        description: "Erzeugt der Clip eine offene Frage oder ein Informationsdefizit?"
+      - name: number_density
+        description: "Anzahl konkreter Zahlen/Statistiken pro Sekunde"
+      - name: clarity
+        description: "Durchschnittliche Satzlänge + Lesbarkeitsindikator"
+      - name: information_density
+        description: "Inhaltswörter vs. Füllwörter — Verhältnis"
+      - name: novelty_proxy
+        description: "Enthält seltene oder ungewöhnliche Begriffe?"
+      - name: controversy_proxy
+        description: "Übereinstimmung mit rhetorischen Kontrast-/Kontrovers-Markern"
+      - name: actionability
+        description: "Enthält der Clip konkrete Handlungsanweisungen?"
+      - name: niche_keywords
+        description: "Anzahl domänenspezifischer Keywords (konfigurierbar)"
+      - name: duration
+        description: "Länge des Clips in Sekunden"
+      - name: hook_in_first_3s
+        description: "Boolean: Enthält der Clip einen rhetorischen Marker in den ersten 3 Sekunden?"
+    new_tables:
+      - name: clip_features
+        columns:
+          - candidate_id
+          - feature_type (text | audio | video)
+          - feature_key
+          - feature_value
+          - computed_at
+
+  - id: w3-t2
+    name: "Audio-Features implementieren"
+    days: [17]
+    priority: high
+    description: >
+      Audio-basierte Features aus der extrahierten Audiodatei berechnen.
+      Auf bestehende ffmpeg/librosa-Werkzeuge aufbauen.
+    features:
+      - name: loudness_mean
+        description: "Durchschnittliche Lautheit (RMS oder LUFS)"
+      - name: loudness_dynamics
+        description: "Varianz der Lautheit — hohe Dynamik = interessanter"
+      - name: pause_ratio
+        description: "Anteil der Stille an der Gesamtdauer"
+      - name: speech_rate
+        description: "Wörter pro Sekunde aus Transkript-Timestamps"
+      - name: opening_energy
+        description: "Lautheit in den ersten 3 Sekunden relativ zum Clip-Durchschnitt"
+      - name: filler_word_density
+        description: "Füllwörter (äh, ähm, also, halt) pro Sekunde — optional"
+    notes: "librosa oder scipy für Audio-Analyse. Timestamps kommen aus WhisperX-Output."
+
+  - id: w3-t3
+    name: "Video-Features implementieren"
+    days: [18]
+    priority: high
+    description: >
+      Einfache video-basierte Features — kein komplexes CV nötig.
+      Shot-Daten aus Woche 2 wiederverwenden.
+    features:
+      - name: shot_count
+        description: "Anzahl Shot-Wechsel im Clip (aus shots-Tabelle)"
+      - name: face_visible
+        description: "Boolean: Gesicht in mindestens einem Keyframe erkennbar? (einfacher Haar-Cascade oder MediaPipe)"
+      - name: cropability_9_16
+        description: "Grobe Einschätzung ob 9:16-Crop sinnvoll möglich ist (Gesicht/Hauptobjekt mittig?)"
+      - name: ocr_text_present
+        description: "Boolean: Ist Text/Schrift im Bild sichtbar?"
+      - name: visual_dynamics
+        description: "Grobe Bewegungsschätzung über Frame-Differenz der Keyframes"
+    notes: "Einfach starten — kein YOLO, kein Segment Anything. Haar-Cascade reicht für Gesichtserkennung."
+
+  - id: w3-t4
+    name: "Specialist Scores definieren und implementieren"
+    days: [19]
+    priority: critical
+    description: >
+      Erste Scoring-Schicht: hybride Logik aus Features. Noch keine komplexen Modelle —
+      gewichtete Heuristik reicht. Schema aus ai/schemas/clip_score.json einhalten.
+    scores:
+      - name: hook_score
+        inputs: [hook_strength, hook_in_first_3s, opening_energy, curiosity_gap]
+        description: "Wie stark zieht der Clip in den ersten Sekunden rein?"
+      - name: retention_score
+        inputs: [information_density, clarity, speech_rate, pause_ratio]
+        description: "Wie wahrscheinlich bleibt der Zuschauer bis zum Ende?"
+      - name: share_score
+        inputs: [controversy_proxy, novelty_proxy, actionability, number_density]
+        description: "Wie hoch ist die Wahrscheinlichkeit, dass der Clip geteilt wird?"
+      - name: packaging_score
+        inputs: [cropability_9_16, face_visible, shot_count, ocr_text_present]
+        description: "Wie gut eignet sich der Clip für 9:16 Shorts-Format?"
+      - name: risk_score
+        inputs: [filler_word_density, pause_ratio, clarity]
+        description: "Wie hoch ist das Risiko schlechter Performance? (invertiert in Ranking)"
+    implementation: "Erst gewichtete Summe. XGBoost nur wenn Zeit bleibt."
+    schema_reference: "ai/schemas/clip_score.json"
+
+  - id: w3-t5
+    name: "Meta-Ranker bauen"
+    days: [20]
+    priority: critical
+    description: >
+      Specialist Scores zu einem finalen viral_score kombinieren und Top-10 auswählen.
+    approach:
+      primary: "Gewichtete Summe der Specialist Scores (schnell, erklärbar)"
+      optional: "Kleines XGBoost-Modell mit synthetischen/heuristischen Labels wenn Zeit"
+    weights_initial:
+      hook_score: 0.35
+      retention_score: 0.25
+      share_score: 0.20
+      packaging_score: 0.15
+      risk_score: -0.05
+    output:
+      - viral_score pro Kandidat
+      - rank (1–N)
+      - Top-10 gefilterte Liste
+    notes: "Gewichte sind konfigurierbar — in .env oder config-Datei auslagern."
+
+  - id: w3-t6
+    name: "Score-Erklärung einbauen"
+    days: [20]
+    priority: high
+    description: >
+      Zu jedem Top-Clip 3–5 menschenlesbare Gründe generieren.
+      Regelbasiert ist vollständig ausreichend.
+    reason_tags:
+      - "starker Einstieg"
+      - "hohe Informationsdichte"
+      - "gute Cropbarkeit"
+      - "kontroverse Aussage"
+      - "kurze klare Struktur"
+      - "konkreter Tipp / Handlungsempfehlung"
+      - "rhetorischer Trigger in ersten 3 Sekunden"
+      - "hohe Sprecher-Energie am Anfang"
+    logic: >
+      Wenn hook_score > Schwellenwert → Tag 'starker Einstieg' hinzufügen.
+      Wenn packaging_score hoch → Tag 'gute Cropbarkeit'.
+      Usw. — pro Score ein oder zwei Tags ableiten.
+    storage: "reasons-Array in clip_score.json-Struktur, in DB als JSONB-Spalte"
+
+  - id: w3-t7
+    name: "Ranking-Endpoint bauen"
+    days: [21]
+    priority: critical
+    description: >
+      API-Endpunkt für geranktes Top-10 Ergebnis.
+    endpoints:
+      - method: GET
+        path: "/videos/{id}/ranked-clips"
+        response:
+          - rank
+          - candidate_id
+          - start
+          - end
+          - duration
+          - candidate_type
+          - viral_score
+          - hook_score
+          - retention_score
+          - share_score
+          - packaging_score
+          - risk_score
+          - reasons (Liste von 3–5 Tags)
+          - transcript_preview
+          - title_suggestions_v0 (einfache Varianten aus Hook-Text)
+    notes: "title_suggestions_v0 darf simpel sein: ersten Satz + Variante mit Zahl."
+
+  - id: w3-t8
+    name: "Manuelle Qualitätsprüfung des Rankings"
+    days: [21]
+    priority: high
+    description: >
+      Ranking mit echtem Video manuell verifizieren.
+    checklist:
+      - Top-10 enthält erkennbar bessere Clips als Bottom-10
+      - Gründe-Tags sind inhaltlich nachvollziehbar
+      - kein Kandidat mit offensichtlichem Qualitätsproblem in Top 5
+      - viral_score-Verteilung ist nicht komplett flach (keine Gleichverteilung)
+
+acceptance_criteria:
+  - "Das System rankt alle Kandidaten eines Videos."
+  - "Ich bekomme eine Top-10 per GET /videos/{id}/ranked-clips."
+  - "Ich sehe zu jedem Clip 3–5 Gründe, warum er oben steht."
+  - "Die Top-Ergebnisse wirken besser als Zufall."
+
+daily_focus:
+  day_15_16: "Text-Features"
+  day_17:    "Audio-Features"
+  day_18:    "Video-Features light"
+  day_19:    "Specialist Scores"
+  day_20:    "Meta-Ranker + Score-Erklärung"
+  day_21:    "Ranking API + manuelle Prüfung"
+
+technical_focus:
+  - Erklärbarkeit wichtiger als Modellkomplexität
+  - heuristische Gewichtung ist ausreichend — kein Overengineering
+  - XGBoost nur als optionale Erweiterung, nicht als Basis
+
+new_db_tables:
+  - clip_features
+  - "clip_scores (Spalten: candidate_id, hook_score, retention_score, share_score, packaging_score, risk_score, viral_score, rank, reasons JSONB)"
+
+schema_references:
+  - ai/schemas/clip_score.json
+  - ai/schemas/clip_candidate.json
+  - ai/prompts/scoring.md
+
+out_of_scope:
+  - komplexe End-to-End-Modelle (kein CLIP, kein LLM-Scoring)
+  - Diarization
+  - Packaging oder Subtitle-Rendering (kommt Woche 4)
+  - Frontend
+  - automatisches Retraining

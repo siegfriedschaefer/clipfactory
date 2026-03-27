@@ -1,0 +1,24 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# WhisperX + CUDA — uncomment Day 5-6 and switch base image to pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+# RUN pip install whisperx torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+COPY apps/worker_gpu ./apps/worker_gpu
+COPY services ./services
+
+ENV PYTHONPATH=/app
+ENV WHISPER_DEVICE=cpu
+ENV WHISPER_COMPUTE_TYPE=int8
+
+CMD ["python", "-m", "apps.worker_gpu"]

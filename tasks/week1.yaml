@@ -1,0 +1,164 @@
+week: 1
+theme: "Fundament und End-to-End-Basis"
+goal: "Minimale Pipeline, die lokal ein Video annimmt, normalisiert, transkribiert und Artefakte speichert."
+
+deliverables:
+  - lokales Repo-Grundgerüst
+  - Docker Compose (postgres, redis, api, worker_cpu, worker_gpu)
+  - FastAPI-Basis
+  - Postgres + Redis
+  - lokales File Storage
+  - Video Upload
+  - ffmpeg-Normalisierung
+  - WhisperX-Transkription
+  - Status-Tracking für Jobs
+
+tasks:
+  - id: w1-t1
+    name: "Projektstruktur anlegen"
+    days: [1, 2]
+    priority: critical
+    description: >
+      Repo-Grundgerüst nach vorgegebener Struktur aufbauen.
+    structure:
+      apps/api: "FastAPI-Anwendung"
+      apps/worker_cpu: "CPU-Worker-Prozess"
+      apps/worker_gpu: "GPU-Worker-Prozess (WhisperX)"
+      apps/frontend: "Placeholder, noch nicht implementiert"
+      services/ingestion: "ffmpeg-Normalisierung, Audio-Extraktion"
+      services/asr: "WhisperX-Transkription"
+      services/storage: "lokale Dateispeicherung"
+      services/jobs: "Job-State-Maschine"
+      infra/docker: "Dockerfiles + Compose"
+      storage/: "lokale Ablage für Videos, Artefakte"
+      scripts/: "Hilfsskripte"
+      tests/: "Teststruktur"
+
+  - id: w1-t2
+    name: "Infrastruktur lokal hochziehen"
+    days: [1, 2]
+    priority: critical
+    description: >
+      Docker Compose mit allen Services aufsetzen. Frontend noch nicht nötig —
+      Swagger UI reicht als Interface.
+    services:
+      - postgres
+      - redis
+      - api
+      - worker_cpu
+      - worker_gpu
+    notes: "Kein Frontend in Woche 1. Swagger + optional einfache HTML-Seite."
+
+  - id: w1-t3
+    name: "Datenmodell minimal anlegen"
+    days: [1, 2]
+    priority: critical
+    description: >
+      Nur die drei initialen Tabellen anlegen. Keine vorauseilenden Schemas.
+    tables:
+      - name: videos
+        purpose: "Metadaten zu hochgeladenen Videos"
+      - name: jobs
+        purpose: "Job-Status und Fortschrittsverfolgung"
+      - name: transcript_segments
+        purpose: "Transkript-Segmente mit Word-Timestamps"
+    notes: "Alembic-Migrationen von Anfang an nutzen."
+
+  - id: w1-t4
+    name: "Upload + Storage implementieren"
+    days: [3]
+    priority: critical
+    description: >
+      Upload-Endpoint bauen, Datei lokal ablegen, Metadatensatz in DB schreiben.
+    deliverables:
+      - "POST /videos — Upload-Endpoint"
+      - "Ablage unter /storage/videos/{video_id}/raw.*"
+      - "videos-Eintrag in DB mit Status 'uploaded'"
+
+  - id: w1-t5
+    name: "Ingestion-Service bauen"
+    days: [4]
+    priority: critical
+    description: >
+      CPU-Worker verarbeitet hochgeladenes Video vor der Transkription.
+    steps:
+      - Video validieren (Format, Größe, Dauer)
+      - mit ffmpeg auf Zielformat normalisieren
+      - Audio als WAV/MP3 extrahieren
+      - Dauer, Auflösung, FPS aus Videometadaten lesen und speichern
+      - Job-Status auf 'ready_for_asr' setzen
+
+  - id: w1-t6
+    name: "ASR-Service bauen"
+    days: [5, 6]
+    priority: critical
+    description: >
+      GPU-Worker transkribiert das normalisierte Audio mit WhisperX.
+    steps:
+      - WhisperX aufrufen (Modell konfigurierbar)
+      - Segmente mit Wort-Level-Timestamps extrahieren
+      - JSON-Artefakte unter /storage/videos/{video_id}/transcript.json ablegen
+      - transcript_segments-Tabelle befüllen
+      - Job-Status auf 'transcribed' setzen
+    notes: "GPU optional — Fallback auf CPU-Modus für lokale Entwicklung ohne GPU."
+
+  - id: w1-t7
+    name: "Job-State-Maschine definieren und implementieren"
+    days: [7]
+    priority: critical
+    description: >
+      Klare Zustandsübergänge für Jobs — kein impliziter Status irgendwo.
+    states:
+      - uploaded
+      - ingesting
+      - ready_for_asr
+      - transcribing
+      - transcribed
+      - failed
+    transitions:
+      uploaded -> ingesting: "CPU-Worker nimmt Job auf"
+      ingesting -> ready_for_asr: "Ingestion erfolgreich abgeschlossen"
+      ready_for_asr -> transcribing: "GPU-Worker nimmt Job auf"
+      transcribing -> transcribed: "WhisperX erfolgreich"
+      any -> failed: "Fehler in beliebigem Schritt"
+    deliverables:
+      - "GET /videos/{id}/status — Job-Status abrufen"
+      - "GET /videos/{id}/transcript — Transkriptsegmente abrufen"
+
+  - id: w1-t8
+    name: "Tests und Cleanup"
+    days: [7]
+    priority: high
+    description: >
+      Ende-zu-Ende-Durchlauf verifizieren. Kein Perfektionismus — nur Basistests.
+    scope:
+      - Upload-Endpoint erreichbar
+      - Video landet korrekt im Storage
+      - Ingestion läuft durch ohne Fehler
+      - Transkription produziert JSON-Output
+      - Segmente per API abrufbar
+
+acceptance_criteria:
+  - "Ich lade ein Video hoch."
+  - "Ich starte Analyse (POST /jobs oder ähnlich)."
+  - "Das System transkribiert das Video."
+  - "Ich kann Transkriptsegmente per GET /videos/{id}/transcript abrufen."
+
+daily_focus:
+  day_1_2: "Repo, Docker, DB, Redis, API-Skelett"
+  day_3:   "Upload + Storage"
+  day_4:   "ffmpeg-Ingestion"
+  day_5_6: "WhisperX-Service"
+  day_7:   "Job-State, Tests, Cleanup"
+
+technical_focus:
+  - Robustheit über Features
+  - saubere Speicherstruktur von Anfang an
+  - reproduzierbare Pipeline (Docker, Migrations, Config via .env)
+
+out_of_scope:
+  - Diarization
+  - Shot Detection (kommt Woche 2)
+  - Scoring oder Kandidatengenerierung
+  - Frontend (Swagger reicht)
+  - Optimierung

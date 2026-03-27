@@ -1,0 +1,8 @@
+{
+  "clip_id": "string",
+  "hook_score": "number",
+  "retention_score": "number",
+  "share_score": "number",
+  "viral_score": "number",
+  "reasons": ["string"]
+}
