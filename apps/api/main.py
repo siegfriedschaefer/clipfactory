@@ -4,6 +4,7 @@ from sqlalchemy import text
 
 from apps.api.config import settings
 from apps.api.database import async_session_factory
+from apps.api.routers import videos
 
 app = FastAPI(
     title="ClipFabric API",
@@ -20,6 +21,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(videos.router)
 
 
 @app.get("/health", tags=["system"])
