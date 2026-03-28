@@ -2,6 +2,7 @@ import argparse
 import json
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from moonshine_voice import Transcriber, load_wav_file, get_model_for_language
@@ -51,9 +52,12 @@ def main() -> None:
     audio_data, sample_rate = load_wav_file(wav_path)
 
     print("Transcribing...")
+    t0 = time.perf_counter()
     transcript = transcriber.transcribe_without_streaming(audio_data, sample_rate)
+    elapsed = time.perf_counter() - t0
     result = "\n".join(line.text for line in transcript.lines)
 
+    print(f"Transcription took {elapsed:.2f}s")
     print("\n--- Transcript ---")
     print(result)
 
