@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,7 +26,7 @@ class VideoResponse(BaseModel):
 
 @router.post("", response_model=VideoResponse, status_code=201)
 async def upload_video(
-    file: UploadFile,
+    file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
 ) -> VideoResponse:
     """Upload a video file. Creates a DB record and stores the raw file."""
