@@ -1,4 +1,4 @@
-# ClipFabric
+# ClipFactory
 
 Lokales MVP für die Analyse von Longform-Videos, die Erzeugung von Clip-Kandidaten, das Ranking nach Viralitätssignalen und den Export von Shorts.
 
