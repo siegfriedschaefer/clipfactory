@@ -15,6 +15,7 @@ deliverables:
 tasks:
   - id: w3-t1
     name: "Text-Features implementieren"
+    done: false
     days: [15, 16]
     priority: critical
     description: >
@@ -54,6 +55,7 @@ tasks:
 
   - id: w3-t2
     name: "Audio-Features implementieren"
+    done: false
     days: [17]
     priority: high
     description: >
@@ -76,6 +78,7 @@ tasks:
 
   - id: w3-t3
     name: "Video-Features implementieren"
+    done: false
     days: [18]
     priority: high
     description: >
@@ -96,6 +99,7 @@ tasks:
 
   - id: w3-t4
     name: "Specialist Scores definieren und implementieren"
+    done: false
     days: [19]
     priority: critical
     description: >
@@ -122,6 +126,7 @@ tasks:
 
   - id: w3-t5
     name: "Meta-Ranker bauen"
+    done: false
     days: [20]
     priority: critical
     description: >
@@ -143,6 +148,7 @@ tasks:
 
   - id: w3-t6
     name: "Score-Erklärung einbauen"
+    done: false
     days: [20]
     priority: high
     description: >
@@ -165,6 +171,7 @@ tasks:
 
   - id: w3-t7
     name: "Ranking-Endpoint bauen"
+    done: false
     days: [21]
     priority: critical
     description: >
@@ -192,6 +199,7 @@ tasks:
 
   - id: w3-t8
     name: "Manuelle Qualitätsprüfung des Rankings"
+    done: false
     days: [21]
     priority: high
     description: >

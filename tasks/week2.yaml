@@ -12,6 +12,7 @@ deliverables:
 tasks:
   - id: w2-t1
     name: "Shot Detection integrieren"
+    done: false
     days: [8, 9]
     priority: critical
     description: >
@@ -33,6 +34,7 @@ tasks:
 
   - id: w2-t2
     name: "Semantische Segmentierung bauen"
+    done: false
     days: [10, 11]
     priority: critical
     description: >
@@ -56,6 +58,7 @@ tasks:
 
   - id: w2-t3
     name: "Rhetorische Marker-Bibliothek definieren"
+    done: false
     days: [10, 11]
     priority: high
     description: >
@@ -84,6 +87,7 @@ tasks:
 
   - id: w2-t4
     name: "Candidate Generator bauen"
+    done: false
     days: [12, 13]
     priority: critical
     description: >
@@ -116,6 +120,7 @@ tasks:
 
   - id: w2-t5
     name: "Preview-Endpoint bauen"
+    done: false
     days: [14]
     priority: critical
     description: >
@@ -134,6 +139,7 @@ tasks:
 
   - id: w2-t6
     name: "Review und manuelle Qualitätsprüfung"
+    done: false
     days: [14]
     priority: high
     description: >
