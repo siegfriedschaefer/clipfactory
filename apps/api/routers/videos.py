@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.database import get_session
-from apps.api.models import Job, JobStatus, TranscriptSegment, Video
+from apps.api.models import ClipCandidate, Job, JobStatus, TranscriptSegment, Video
 from services.storage import save_upload, video_dir
 
 router = APIRouter(prefix="/videos", tags=["videos"])
@@ -52,6 +52,20 @@ class SegmentResponse(BaseModel):
 class TranscriptResponse(BaseModel):
     video_id: uuid.UUID
     segments: list[SegmentResponse]
+
+
+class CandidateResponse(BaseModel):
+    id: uuid.UUID
+    candidate_index: int
+    start_time: float
+    end_time: float
+    duration: float
+    candidate_type: str
+    trigger_marker: str | None
+    transcript_preview: str | None
+    status: str
+
+    model_config = {"from_attributes": True}
 
 
 @router.get("", response_model=list[VideoResponse])
@@ -168,3 +182,20 @@ async def get_transcript(
         video_id=video_id,
         segments=[SegmentResponse.model_validate(s) for s in segments],
     )
+
+
+@router.get("/{video_id}/candidates", response_model=list[CandidateResponse])
+async def get_candidates(
+    video_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> list[CandidateResponse]:
+    """Return all clip candidates for a video ordered by start time."""
+    result = await session.execute(
+        select(ClipCandidate)
+        .where(ClipCandidate.video_id == video_id)
+        .order_by(ClipCandidate.candidate_index)
+    )
+    candidates = result.scalars().all()
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No candidates found for this video.")
+    return [CandidateResponse.model_validate(c) for c in candidates]

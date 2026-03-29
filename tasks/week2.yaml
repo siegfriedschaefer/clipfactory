@@ -34,7 +34,7 @@ tasks:
 
   - id: w2-t2
     name: "Semantische Segmentierung bauen"
-    done: false
+    done: true
     days: [10, 11]
     priority: critical
     description: >
@@ -58,7 +58,7 @@ tasks:
 
   - id: w2-t3
     name: "Rhetorische Marker-Bibliothek definieren"
-    done: false
+    done: true
     days: [10, 11]
     priority: high
     description: >
@@ -87,7 +87,7 @@ tasks:
 
   - id: w2-t4
     name: "Candidate Generator bauen"
-    done: false
+    done: true
     days: [12, 13]
     priority: critical
     description: >
@@ -120,7 +120,7 @@ tasks:
 
   - id: w2-t5
     name: "Preview-Endpoint bauen"
-    done: false
+    done: true
     days: [14]
     priority: critical
     description: >
