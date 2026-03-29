@@ -9,9 +9,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from apps.api.config import settings
-from apps.api.models import Job, JobStatus, Video
+from apps.api.models import Job, JobStatus, Shot, Video
 from services.ingestion import run_ingestion
 from services.jobs import transition
+from services.shot_detection import run_shot_detection
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -40,6 +41,15 @@ def process(payload: dict, session: Session, r: redis.Redis) -> None:
     video.duration_seconds = result["duration"]
     video.resolution = result["resolution"]
     video.fps = result["fps"]
+    session.commit()
+
+    logger.info("Running shot detection for video %s", video_id)
+    shots = run_shot_detection(video_id, result["normalized_path"])
+    for shot in shots:
+        session.add(Shot(video_id=video_id, **shot))
+    session.commit()
+    logger.info("Video %s — %d shots detected", video_id, len(shots))
+
     video.status = "ready_for_asr"
     transition(job, JobStatus.ready_for_asr)
     session.commit()

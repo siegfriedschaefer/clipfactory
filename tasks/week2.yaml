@@ -12,7 +12,7 @@ deliverables:
 tasks:
   - id: w2-t1
     name: "Shot Detection integrieren"
-    done: false
+    done: true
     days: [8, 9]
     priority: critical
     description: >
