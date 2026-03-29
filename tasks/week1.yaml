@@ -16,6 +16,7 @@ deliverables:
 tasks:
   - id: w1-t1
     name: "Projektstruktur anlegen"
+    done: true
     days: [1, 2]
     priority: critical
     description: >
@@ -36,6 +37,7 @@ tasks:
 
   - id: w1-t2
     name: "Infrastruktur lokal hochziehen"
+    done: true
     days: [1, 2]
     priority: critical
     description: >
@@ -51,6 +53,7 @@ tasks:
 
   - id: w1-t3
     name: "Datenmodell minimal anlegen"
+    done: true
     days: [1, 2]
     priority: critical
     description: >
@@ -66,6 +69,7 @@ tasks:
 
   - id: w1-t4
     name: "Upload + Storage implementieren"
+    done: true
     days: [3]
     priority: critical
     description: >
@@ -77,6 +81,7 @@ tasks:
 
   - id: w1-t5
     name: "Ingestion-Service bauen"
+    done: true
     days: [4]
     priority: critical
     description: >
@@ -90,6 +95,7 @@ tasks:
 
   - id: w1-t6
     name: "ASR-Service bauen"
+    done: true
     days: [5, 6]
     priority: critical
     description: >
@@ -104,6 +110,7 @@ tasks:
 
   - id: w1-t7
     name: "Job-State-Maschine definieren und implementieren"
+    done: true
     days: [7]
     priority: critical
     description: >
@@ -127,6 +134,7 @@ tasks:
 
   - id: w1-t8
     name: "Tests und Cleanup"
+    done: true
     days: [7]
     priority: high
     description: >
