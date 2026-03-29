@@ -1,4 +1,5 @@
 import json
+import shutil
 import uuid
 from datetime import datetime
 
@@ -11,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.config import settings
 from apps.api.database import get_session
 from apps.api.models import Job, JobStatus, TranscriptSegment, Video
-from services.storage import save_upload
+from services.storage import save_upload, video_dir
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 
@@ -51,6 +52,16 @@ class SegmentResponse(BaseModel):
 class TranscriptResponse(BaseModel):
     video_id: uuid.UUID
     segments: list[SegmentResponse]
+
+
+@router.get("", response_model=list[VideoResponse])
+async def list_videos(
+    session: AsyncSession = Depends(get_session),
+) -> list[VideoResponse]:
+    """Return all videos ordered by upload time (newest first)."""
+    result = await session.execute(select(Video).order_by(Video.created_at.desc()))
+    videos = result.scalars().all()
+    return [VideoResponse.model_validate(v) for v in videos]
 
 
 @router.post("", response_model=VideoResponse, status_code=201)
@@ -97,6 +108,25 @@ async def upload_video(
         await r.aclose()
 
     return VideoResponse.model_validate(video)
+
+
+@router.delete("/{video_id}", status_code=204)
+async def delete_video(
+    video_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Delete a video, all its DB records, and all storage artifacts."""
+    result = await session.execute(select(Video).where(Video.id == video_id))
+    video = result.scalar_one_or_none()
+    if video is None:
+        raise HTTPException(status_code=404, detail="Video not found.")
+
+    await session.delete(video)
+    await session.flush()
+
+    storage_path = video_dir(video_id)
+    if storage_path.exists():
+        shutil.rmtree(storage_path)
 
 
 @router.get("/{video_id}/status", response_model=JobStatusResponse)
