@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.database import get_session
-from apps.api.models import ClipCandidate, Job, JobStatus, TranscriptSegment, Video
+from sqlalchemy.orm import selectinload
+
+from apps.api.models import ClipCandidate, ClipScore, Job, JobStatus, TranscriptSegment, Video
 from services.storage import save_upload, video_dir
 
 router = APIRouter(prefix="/videos", tags=["videos"])
@@ -182,6 +184,94 @@ async def get_transcript(
         video_id=video_id,
         segments=[SegmentResponse.model_validate(s) for s in segments],
     )
+
+
+class RankedClipResponse(BaseModel):
+    rank: int
+    candidate_id: uuid.UUID
+    start_time: float
+    end_time: float
+    duration: float
+    candidate_type: str
+    viral_score: float
+    hook_score: float
+    retention_score: float
+    share_score: float
+    packaging_score: float
+    risk_score: float
+    reasons: list[str]
+    transcript_preview: str | None
+    title_suggestions_v0: list[str]
+
+
+@router.get("/{video_id}/ranked-clips", response_model=list[RankedClipResponse])
+async def get_ranked_clips(
+    video_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> list[RankedClipResponse]:
+    """Return Top-10 ranked clip candidates for a video with scores and reasons."""
+    result = await session.execute(
+        select(ClipCandidate)
+        .where(ClipCandidate.video_id == video_id)
+        .options(selectinload(ClipCandidate.score))
+        .order_by(ClipCandidate.candidate_index)
+    )
+    candidates = result.scalars().all()
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No candidates found for this video.")
+
+    scored = [c for c in candidates if c.score is not None]
+    if not scored:
+        raise HTTPException(status_code=404, detail="Ranking not yet computed for this video.")
+
+    top10 = sorted(scored, key=lambda c: c.score.rank)[:10]
+
+    return [
+        RankedClipResponse(
+            rank=c.score.rank,
+            candidate_id=c.id,
+            start_time=c.start_time,
+            end_time=c.end_time,
+            duration=c.duration,
+            candidate_type=c.candidate_type,
+            viral_score=c.score.viral_score,
+            hook_score=c.score.hook_score,
+            retention_score=c.score.retention_score,
+            share_score=c.score.share_score,
+            packaging_score=c.score.packaging_score,
+            risk_score=c.score.risk_score,
+            reasons=c.score.reasons or [],
+            transcript_preview=c.transcript_preview,
+            title_suggestions_v0=_title_suggestions(c.transcript_preview),
+        )
+        for c in top10
+    ]
+
+
+def _title_suggestions(preview: str | None) -> list[str]:
+    """Generate simple title suggestions from the transcript preview."""
+    if not preview:
+        return []
+
+    import re
+    # Take the first sentence
+    sentences = [s.strip() for s in re.split(r"[.!?]+", preview) if s.strip()]
+    if not sentences:
+        return []
+
+    base = sentences[0]
+    # Truncate to ~80 chars
+    if len(base) > 80:
+        base = base[:77] + "..."
+
+    suggestions = [base]
+
+    # Variant: prefix with a number if one exists in the preview
+    numbers = re.findall(r"\b\d+(?:[.,]\d+)?(?:\s*%|x|X)?\b", preview)
+    if numbers:
+        suggestions.append(f"{numbers[0]}: {base}")
+
+    return suggestions[:2]
 
 
 @router.get("/{video_id}/candidates", response_model=list[CandidateResponse])

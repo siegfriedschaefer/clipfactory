@@ -126,7 +126,7 @@ tasks:
 
   - id: w3-t5
     name: "Meta-Ranker bauen"
-    done: false
+    done: true
     days: [20]
     priority: critical
     description: >
@@ -148,7 +148,7 @@ tasks:
 
   - id: w3-t6
     name: "Score-Erklärung einbauen"
-    done: false
+    done: true
     days: [20]
     priority: high
     description: >
@@ -171,7 +171,7 @@ tasks:
 
   - id: w3-t7
     name: "Ranking-Endpoint bauen"
-    done: false
+    done: true
     days: [21]
     priority: critical
     description: >

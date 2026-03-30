@@ -100,3 +100,102 @@ def compute_specialist_scores(features: dict[str, float]) -> dict[str, float]:
         "packaging_score":  packaging_score,
         "risk_score":       risk_score,
     }
+
+
+# ---------------------------------------------------------------------------
+# Meta-ranker weights (from week3.yaml)
+# ---------------------------------------------------------------------------
+
+_VIRAL_WEIGHTS = {
+    "hook_score":       0.35,
+    "retention_score":  0.25,
+    "share_score":      0.20,
+    "packaging_score":  0.15,
+    "risk_score":      -0.05,
+}
+
+
+def compute_viral_score(scores: dict[str, float]) -> float:
+    """Combine specialist scores into a single viral_score in [0, 1]."""
+    raw = sum(scores.get(k, 0.0) * w for k, w in _VIRAL_WEIGHTS.items())
+    return round(min(1.0, max(0.0, raw)), 4)
+
+
+# ---------------------------------------------------------------------------
+# Reason tag generation (w3-t6)
+# ---------------------------------------------------------------------------
+
+def generate_reasons(scores: dict[str, float], features: dict[str, float]) -> list[str]:
+    """Derive 3–5 human-readable reason tags from scores and features."""
+    tags: list[tuple[float, str]] = []  # (signal_strength, tag)
+
+    if scores.get("hook_score", 0.0) >= 0.6:
+        tags.append((scores["hook_score"], "starker Einstieg"))
+
+    if features.get("hook_in_first_3s", 0.0) >= 0.5:
+        tags.append((features["hook_in_first_3s"], "rhetorischer Trigger in ersten 3 Sekunden"))
+
+    if features.get("opening_energy", 0.0) >= 0.5:
+        tags.append((features["opening_energy"], "hohe Sprecher-Energie am Anfang"))
+
+    if features.get("information_density", 0.0) >= 0.55:
+        tags.append((features["information_density"], "hohe Informationsdichte"))
+
+    if features.get("actionability", 0.0) >= 0.45:
+        tags.append((features["actionability"], "konkreter Tipp / Handlungsempfehlung"))
+
+    if features.get("controversy_proxy", 0.0) >= 0.35:
+        tags.append((features["controversy_proxy"], "kontroverse Aussage"))
+
+    if features.get("clarity", 0.0) >= 0.6 and features.get("duration", 60.0) <= 35.0:
+        tags.append((features["clarity"], "kurze klare Struktur"))
+
+    if scores.get("packaging_score", 0.0) >= 0.6:
+        tags.append((scores["packaging_score"], "gute Cropbarkeit"))
+
+    if features.get("number_density", 0.0) >= 0.3:
+        tags.append((features["number_density"], "konkrete Zahlen / Statistiken"))
+
+    if features.get("novelty_proxy", 0.0) >= 0.4:
+        tags.append((features["novelty_proxy"], "ungewöhnlicher Sprachstil"))
+
+    # Sort by signal strength descending, return top 3–5
+    tags.sort(key=lambda t: t[0], reverse=True)
+    selected = [tag for _, tag in tags[:5]]
+
+    # Always return at least 3 tags, padding with the next best if needed
+    if len(selected) < 3 and len(tags) >= 3:
+        selected = [tag for _, tag in tags[:3]]
+    elif len(selected) < 1:
+        selected = ["kein klares Stärken-Signal"]
+
+    return selected
+
+
+# ---------------------------------------------------------------------------
+# Full ranking pass over all candidates for one video
+# ---------------------------------------------------------------------------
+
+def rank_candidates(
+    candidates: list[dict],
+) -> list[dict]:
+    """Compute viral_score, rank, and reasons for all candidates of a video.
+
+    Args:
+        candidates: list of dicts, each with:
+            - candidate_id (any hashable)
+            - scores: dict from compute_specialist_scores()
+            - features: flat feature dict
+
+    Returns same list enriched with viral_score, rank, reasons — sorted by rank.
+    """
+    for c in candidates:
+        c["viral_score"] = compute_viral_score(c["scores"])
+        c["reasons"] = generate_reasons(c["scores"], c["features"])
+
+    # Sort descending by viral_score; stable sort preserves order on ties
+    ranked = sorted(candidates, key=lambda c: c["viral_score"], reverse=True)
+    for i, c in enumerate(ranked, start=1):
+        c["rank"] = i
+
+    return ranked
