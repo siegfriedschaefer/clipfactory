@@ -12,4 +12,5 @@ pandas==2.2.2
 xgboost==2.1.1
 scikit-learn==1.5.1
 moonshine-voice==0.0.51
-scenedetect[opencv]==0.6.7.1
+scenedetect==0.6.7.1
+opencv-python-headless>=4.8,<5
