@@ -197,3 +197,28 @@ class ClipCandidate(Base):
     )
 
     video: Mapped["Video"] = relationship("Video", back_populates="clip_candidates")
+    features: Mapped[list["ClipFeature"]] = relationship(
+        "ClipFeature", back_populates="candidate", cascade="all, delete-orphan"
+    )
+
+
+class ClipFeature(Base):
+    __tablename__ = "clip_features"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("clip_candidates.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    feature_type: Mapped[str] = mapped_column(String(16), nullable=False)  # text | audio | video
+    feature_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    feature_value: Mapped[float] = mapped_column(Float, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+    candidate: Mapped["ClipCandidate"] = relationship("ClipCandidate", back_populates="features")

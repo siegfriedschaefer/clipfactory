@@ -11,9 +11,11 @@ from sqlalchemy.orm import Session
 from apps.api.config import settings
 from sqlalchemy import select
 
-from apps.api.models import ClipCandidate, Job, JobStatus, SemanticSegment, Shot, TranscriptSegment, Video
+from apps.api.models import ClipCandidate, ClipFeature, Job, JobStatus, SemanticSegment, Shot, TranscriptSegment, Video
 from services.asr import run_asr
 from services.candidates import run_candidate_generation
+from services.audio_features import compute_audio_features
+from services.features import compute_text_features
 from services.jobs import transition
 from services.segmentation import run_segmentation
 
@@ -94,6 +96,46 @@ def process(payload: dict, session: Session) -> None:
         ))
     session.commit()
     logger.info("Video %s — %d clip candidates generated", video_id, len(candidates))
+
+    logger.info("Computing text features for video %s", video_id)
+    db_candidates = session.execute(
+        select(ClipCandidate).where(ClipCandidate.video_id == video_id)
+    ).scalars().all()
+
+    for db_candidate in db_candidates:
+        candidate_dict = {
+            "start_time": db_candidate.start_time,
+            "end_time": db_candidate.end_time,
+            "duration": db_candidate.duration,
+        }
+        features = compute_text_features(candidate_dict, segments)
+        for key, value in features.items():
+            session.add(ClipFeature(
+                candidate_id=db_candidate.id,
+                feature_type="text",
+                feature_key=key,
+                feature_value=value,
+            ))
+    session.commit()
+    logger.info("Video %s — text features computed for %d candidates", video_id, len(db_candidates))
+
+    logger.info("Computing audio features for video %s", video_id)
+    for db_candidate in db_candidates:
+        candidate_dict = {
+            "start_time": db_candidate.start_time,
+            "end_time": db_candidate.end_time,
+            "duration": db_candidate.duration,
+        }
+        audio_features = compute_audio_features(candidate_dict, segments, audio_path)
+        for key, value in audio_features.items():
+            session.add(ClipFeature(
+                candidate_id=db_candidate.id,
+                feature_type="audio",
+                feature_key=key,
+                feature_value=value,
+            ))
+    session.commit()
+    logger.info("Video %s — audio features computed for %d candidates", video_id, len(db_candidates))
 
 
 def main() -> None:

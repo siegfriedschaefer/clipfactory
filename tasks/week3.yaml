@@ -15,7 +15,7 @@ deliverables:
 tasks:
   - id: w3-t1
     name: "Text-Features implementieren"
-    done: false
+    done: true
     days: [15, 16]
     priority: critical
     description: >
@@ -55,7 +55,7 @@ tasks:
 
   - id: w3-t2
     name: "Audio-Features implementieren"
-    done: false
+    done: true
     days: [17]
     priority: high
     description: >
