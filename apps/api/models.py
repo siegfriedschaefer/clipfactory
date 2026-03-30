@@ -200,6 +200,9 @@ class ClipCandidate(Base):
     features: Mapped[list["ClipFeature"]] = relationship(
         "ClipFeature", back_populates="candidate", cascade="all, delete-orphan"
     )
+    score: Mapped["ClipScore | None"] = relationship(
+        "ClipScore", back_populates="candidate", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class ClipFeature(Base):
@@ -222,3 +225,31 @@ class ClipFeature(Base):
     )
 
     candidate: Mapped["ClipCandidate"] = relationship("ClipCandidate", back_populates="features")
+
+
+class ClipScore(Base):
+    __tablename__ = "clip_scores"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("clip_candidates.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    hook_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    retention_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    share_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    packaging_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    risk_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    viral_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reasons: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+    candidate: Mapped["ClipCandidate"] = relationship("ClipCandidate", back_populates="score")

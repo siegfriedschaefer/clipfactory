@@ -11,12 +11,13 @@ from sqlalchemy.orm import Session
 from apps.api.config import settings
 from sqlalchemy import select
 
-from apps.api.models import ClipCandidate, ClipFeature, Job, JobStatus, SemanticSegment, Shot, TranscriptSegment, Video
+from apps.api.models import ClipCandidate, ClipFeature, ClipScore, Job, JobStatus, SemanticSegment, Shot, TranscriptSegment, Video
 from services.asr import run_asr
 from services.candidates import run_candidate_generation
 from services.audio_features import compute_audio_features
 from services.features import compute_text_features
 from services.video_features import compute_video_features
+from services.scoring import compute_specialist_scores
 from services.jobs import transition
 from services.segmentation import run_segmentation
 
@@ -156,6 +157,26 @@ def process(payload: dict, session: Session) -> None:
             ))
     session.commit()
     logger.info("Video %s — video features computed for %d candidates", video_id, len(db_candidates))
+
+    logger.info("Computing specialist scores for video %s", video_id)
+    # Reload candidates with their features (committed above)
+    db_candidates = session.execute(
+        select(ClipCandidate).where(ClipCandidate.video_id == video_id)
+    ).scalars().all()
+
+    for db_candidate in db_candidates:
+        flat_features = {f.feature_key: f.feature_value for f in db_candidate.features}
+        scores = compute_specialist_scores(flat_features)
+        session.add(ClipScore(
+            candidate_id=db_candidate.id,
+            hook_score=scores["hook_score"],
+            retention_score=scores["retention_score"],
+            share_score=scores["share_score"],
+            packaging_score=scores["packaging_score"],
+            risk_score=scores["risk_score"],
+        ))
+    session.commit()
+    logger.info("Video %s — specialist scores computed for %d candidates", video_id, len(db_candidates))
 
 
 def main() -> None:

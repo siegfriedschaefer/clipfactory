@@ -99,7 +99,7 @@ tasks:
 
   - id: w3-t4
     name: "Specialist Scores definieren und implementieren"
-    done: false
+    done: true
     days: [19]
     priority: critical
     description: >
