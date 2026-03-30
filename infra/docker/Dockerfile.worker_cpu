@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY apps/__init__.py ./apps/__init__.py
 COPY apps/api ./apps/api
 COPY apps/worker_cpu ./apps/worker_cpu
 COPY services ./services

@@ -14,7 +14,7 @@ def probe_video(path: Path) -> dict:
         "-show_streams", "-show_format",
         str(path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     if result.returncode != 0:
         raise RuntimeError(f"ffprobe failed:\n{result.stderr}")
 
@@ -51,7 +51,7 @@ def normalize_video(video_id: uuid.UUID, raw_path: Path) -> Path:
         "-movflags", "+faststart",
         str(out_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg normalization failed:\n{result.stderr}")
     return out_path
@@ -74,7 +74,7 @@ def extract_audio(video_id: uuid.UUID, video_path: Path) -> Path:
         "-sample_fmt", "s16",  # 16-bit PCM
         str(out_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg audio extraction failed:\n{result.stderr}")
     return out_path
