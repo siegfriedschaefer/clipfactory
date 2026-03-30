@@ -5,6 +5,9 @@ from sqlalchemy import text
 from apps.api.config import settings
 from apps.api.database import async_session_factory
 from apps.api.routers import videos
+from services.logging_config import setup
+
+setup()
 
 app = FastAPI(
     title="ClipFabric API",

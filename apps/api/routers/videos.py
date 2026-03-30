@@ -1,19 +1,23 @@
+import asyncio
 import json
 import shutil
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from apps.api.config import settings
 from apps.api.database import get_session
-from sqlalchemy.orm import selectinload
-
-from apps.api.models import ClipCandidate, ClipScore, Job, JobStatus, TranscriptSegment, Video
+from apps.api.models import (
+    ClipCandidate, ClipFeedback, ClipScore, ClipVariant,
+    Job, JobStatus, Shot, TranscriptSegment, Video,
+)
 from services.storage import save_upload, video_dir
 
 router = APIRouter(prefix="/videos", tags=["videos"])
@@ -289,3 +293,168 @@ async def get_candidates(
     if not candidates:
         raise HTTPException(status_code=404, detail="No candidates found for this video.")
     return [CandidateResponse.model_validate(c) for c in candidates]
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+class ExportResponse(BaseModel):
+    id: uuid.UUID
+    candidate_id: uuid.UUID
+    variant_type: str
+    file_path: str
+    resolution: str | None
+    title_suggestions: list | None
+    subtitle_path: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+@router.post("/{video_id}/candidates/{candidate_id}/export", response_model=ExportResponse, status_code=201)
+async def export_candidate(
+    video_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> ExportResponse:
+    """Render and export a 9:16 MP4 with burned-in subtitles for a clip candidate."""
+    from services.packaging import export_clip
+
+    result = await session.execute(
+        select(ClipCandidate).where(
+            ClipCandidate.id == candidate_id,
+            ClipCandidate.video_id == video_id,
+        )
+    )
+    candidate = result.scalar_one_or_none()
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Candidate not found.")
+
+    # Check not already exported
+    existing = await session.execute(
+        select(ClipVariant).where(
+            ClipVariant.candidate_id == candidate_id,
+            ClipVariant.variant_type == "export",
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Export already exists for this candidate.")
+
+    # Load transcript segments
+    segs_result = await session.execute(
+        select(TranscriptSegment)
+        .where(TranscriptSegment.video_id == video_id)
+        .order_by(TranscriptSegment.segment_index)
+    )
+    segments = [
+        {"start_time": s.start_time, "end_time": s.end_time, "text": s.text}
+        for s in segs_result.scalars().all()
+    ]
+
+    # Load shots
+    shots_result = await session.execute(
+        select(Shot).where(Shot.video_id == video_id).order_by(Shot.shot_index)
+    )
+    shots = [
+        {"start_time": s.start_time, "end_time": s.end_time}
+        for s in shots_result.scalars().all()
+    ]
+
+    # Load title suggestions from score
+    score_result = await session.execute(
+        select(ClipScore).where(ClipScore.candidate_id == candidate_id)
+    )
+    score = score_result.scalar_one_or_none()
+    title_suggestions = _title_suggestions(candidate.transcript_preview)
+
+    storage_root = Path(settings.storage_root)
+
+    # Run ffmpeg in a thread so we don't block the event loop
+    output = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: export_clip(
+            video_id=video_id,
+            candidate_id=candidate_id,
+            start_time=candidate.start_time,
+            end_time=candidate.end_time,
+            transcript_segments=segments,
+            shots=shots,
+            storage_root=storage_root,
+        ),
+    )
+
+    variant = ClipVariant(
+        candidate_id=candidate_id,
+        variant_type="export",
+        file_path=output["file_path"],
+        resolution=output["resolution"],
+        title_suggestions=title_suggestions,
+        overlay_text=title_suggestions[0] if title_suggestions else None,
+        subtitle_path=output.get("subtitle_path"),
+    )
+    session.add(variant)
+    await session.commit()
+    await session.refresh(variant)
+    return ExportResponse.model_validate(variant)
+
+
+@router.get("/{video_id}/exports", response_model=list[ExportResponse])
+async def get_exports(
+    video_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> list[ExportResponse]:
+    """Return all export artefacts for a video."""
+    result = await session.execute(
+        select(ClipVariant)
+        .join(ClipCandidate, ClipVariant.candidate_id == ClipCandidate.id)
+        .where(ClipCandidate.video_id == video_id)
+        .order_by(ClipVariant.created_at.desc())
+    )
+    variants = result.scalars().all()
+    return [ExportResponse.model_validate(v) for v in variants]
+
+
+# ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+
+class FeedbackRequest(BaseModel):
+    action: str  # positive | negative | exported
+
+
+class FeedbackResponse(BaseModel):
+    id: uuid.UUID
+    candidate_id: uuid.UUID
+    action: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+@router.post("/{video_id}/candidates/{candidate_id}/feedback", response_model=FeedbackResponse, status_code=201)
+async def submit_feedback(
+    video_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    body: FeedbackRequest,
+    session: AsyncSession = Depends(get_session),
+) -> FeedbackResponse:
+    """Record user feedback for a clip candidate."""
+    valid_actions = {"positive", "negative", "exported"}
+    if body.action not in valid_actions:
+        raise HTTPException(status_code=422, detail=f"action must be one of {valid_actions}")
+
+    result = await session.execute(
+        select(ClipCandidate).where(
+            ClipCandidate.id == candidate_id,
+            ClipCandidate.video_id == video_id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Candidate not found.")
+
+    fb = ClipFeedback(candidate_id=candidate_id, video_id=video_id, action=body.action)
+    session.add(fb)
+    await session.commit()
+    await session.refresh(fb)
+    return FeedbackResponse.model_validate(fb)

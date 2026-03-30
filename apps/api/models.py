@@ -81,6 +81,7 @@ class Job(Base):
         default=JobStatus.uploaded,
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
     )
@@ -203,6 +204,12 @@ class ClipCandidate(Base):
     score: Mapped["ClipScore | None"] = relationship(
         "ClipScore", back_populates="candidate", cascade="all, delete-orphan", uselist=False
     )
+    variants: Mapped[list["ClipVariant"]] = relationship(
+        "ClipVariant", back_populates="candidate", cascade="all, delete-orphan"
+    )
+    feedback: Mapped[list["ClipFeedback"]] = relationship(
+        "ClipFeedback", back_populates="candidate", cascade="all, delete-orphan"
+    )
 
 
 class ClipFeature(Base):
@@ -253,3 +260,54 @@ class ClipScore(Base):
     )
 
     candidate: Mapped["ClipCandidate"] = relationship("ClipCandidate", back_populates="score")
+
+
+class ClipVariant(Base):
+    __tablename__ = "clip_variants"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("clip_candidates.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    variant_type: Mapped[str] = mapped_column(String(16), nullable=False)  # export | preview
+    file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    resolution: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    title_suggestions: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    overlay_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subtitle_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+    candidate: Mapped["ClipCandidate"] = relationship("ClipCandidate", back_populates="variants")
+
+
+class ClipFeedback(Base):
+    __tablename__ = "clip_feedback"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("clip_candidates.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("videos.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    action: Mapped[str] = mapped_column(String(16), nullable=False)  # positive | negative | exported
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+    candidate: Mapped["ClipCandidate"] = relationship("ClipCandidate", back_populates="feedback")

@@ -47,6 +47,16 @@ services:
       redis:
         condition: service_healthy
 
+  frontend:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+
   worker_cpu:
     build:
       context: ../..

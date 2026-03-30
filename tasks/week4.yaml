@@ -20,7 +20,7 @@ deliverables:
 tasks:
   - id: w4-t1
     name: "Minimales Frontend bauen"
-    done: false
+    done: true
     days: [22, 23]
     priority: critical
     description: >
@@ -41,7 +41,7 @@ tasks:
 
   - id: w4-t2
     name: "Packaging Engine v1 bauen"
-    done: false
+    done: true
     days: [24, 25]
     priority: critical
     description: >
@@ -61,7 +61,7 @@ tasks:
 
   - id: w4-t3
     name: "Export-Service implementieren"
-    done: false
+    done: true
     days: [24, 25]
     priority: critical
     description: >
@@ -92,7 +92,7 @@ tasks:
 
   - id: w4-t4
     name: "Clip-Preview erzeugen"
-    done: false
+    done: true
     days: [26]
     priority: high
     description: >
@@ -107,7 +107,7 @@ tasks:
 
   - id: w4-t5
     name: "User-Feedback implementieren"
-    done: false
+    done: true
     days: [26]
     priority: high
     description: >
@@ -137,7 +137,7 @@ tasks:
 
   - id: w4-t6
     name: "Stabilisierung"
-    done: false
+    done: true
     days: [27, 28]
     priority: critical
     description: >
