@@ -16,6 +16,7 @@ from services.asr import run_asr
 from services.candidates import run_candidate_generation
 from services.audio_features import compute_audio_features
 from services.features import compute_text_features
+from services.video_features import compute_video_features
 from services.jobs import transition
 from services.segmentation import run_segmentation
 
@@ -136,6 +137,25 @@ def process(payload: dict, session: Session) -> None:
             ))
     session.commit()
     logger.info("Video %s — audio features computed for %d candidates", video_id, len(db_candidates))
+
+    logger.info("Computing video features for video %s", video_id)
+    keyframes_dir = Path(settings.storage_root) / "videos" / str(video_id) / "keyframes"
+    for db_candidate in db_candidates:
+        candidate_dict = {
+            "start_time": db_candidate.start_time,
+            "end_time": db_candidate.end_time,
+            "duration": db_candidate.duration,
+        }
+        video_feats = compute_video_features(candidate_dict, shots_data, keyframes_dir)
+        for key, value in video_feats.items():
+            session.add(ClipFeature(
+                candidate_id=db_candidate.id,
+                feature_type="video",
+                feature_key=key,
+                feature_value=value,
+            ))
+    session.commit()
+    logger.info("Video %s — video features computed for %d candidates", video_id, len(db_candidates))
 
 
 def main() -> None:

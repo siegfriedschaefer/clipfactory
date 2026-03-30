@@ -78,7 +78,7 @@ tasks:
 
   - id: w3-t3
     name: "Video-Features implementieren"
-    done: false
+    done: true
     days: [18]
     priority: high
     description: >
