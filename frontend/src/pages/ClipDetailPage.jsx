@@ -17,6 +17,7 @@ function ScoreBar({ value, label }) {
 export default function ClipDetailPage() {
   const { videoId, candidateId } = useParams();
   const [clip, setClip] = useState(null);
+  const [exports, setExports] = useState([]);
   const [feedback, setFeedback] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportDone, setExportDone] = useState(false);
@@ -28,6 +29,9 @@ export default function ClipDetailPage() {
         const found = clips.find((c) => c.candidate_id === candidateId);
         setClip(found || null);
       })
+      .catch(() => {});
+    api.getExports(videoId)
+      .then((all) => setExports(all.filter((e) => e.candidate_id === candidateId)))
       .catch(() => {});
   }, [videoId, candidateId]);
 
@@ -47,6 +51,8 @@ export default function ClipDetailPage() {
       await api.exportClip(videoId, candidateId);
       setExportDone(true);
       await handleFeedback("exported");
+      const all = await api.getExports(videoId);
+      setExports(all.filter((e) => e.candidate_id === candidateId));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -135,6 +141,24 @@ export default function ClipDetailPage() {
         {feedback && <p className="muted" style={{ marginTop: "0.5rem" }}>Feedback saved: {feedback}</p>}
         {error && <p className="error">{error}</p>}
       </section>
+
+      {exports.length > 0 && (
+        <section className="card">
+          <h2>Exported clips</h2>
+          {exports.map((e) => (
+            <div key={e.id} style={{ marginBottom: "1rem" }}>
+              <p className="muted" style={{ marginBottom: "0.4rem" }}>
+                {e.variant_type} · {e.resolution}
+              </p>
+              <video
+                controls
+                style={{ width: "100%", maxWidth: "360px", borderRadius: "6px" }}
+                src={`/storage/${e.file_path.replace(/^\/storage\//, "")}`}
+              />
+            </div>
+          ))}
+        </section>
+      )}
     </div>
   );
 }

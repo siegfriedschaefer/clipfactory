@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from apps.api.config import settings
@@ -27,6 +28,7 @@ app.add_middleware(
 
 
 app.include_router(videos.router)
+app.mount("/storage", StaticFiles(directory="/storage"), name="storage")
 
 
 @app.get("/health", tags=["system"])
