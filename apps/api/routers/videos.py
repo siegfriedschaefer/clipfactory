@@ -18,7 +18,7 @@ from apps.api.models import (
     ClipCandidate, ClipFeedback, ClipScore, ClipVariant,
     Job, JobStatus, TranscriptSegment, Video,
 )
-from services.storage import save_upload, video_dir
+from services.storage import upload_path, video_dir
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 
@@ -99,12 +99,25 @@ async def upload_video(
             detail=f"Unsupported file type '{ext}'. Allowed: {sorted(ALLOWED_EXTENSIONS)}",
         )
 
-    data = await file.read()
-    if len(data) > MAX_BYTES:
-        raise HTTPException(status_code=413, detail="File exceeds 4 GB limit.")
-
     video_id = uuid.uuid4()
-    saved_path = save_upload(video_id, file.filename, data)
+    saved_path = upload_path(video_id, file.filename)
+
+    # Stream to disk in 1 MB chunks — never buffers the whole file in RAM
+    CHUNK = 1024 * 1024
+    written = 0
+    try:
+        with saved_path.open("wb") as fout:
+            while True:
+                chunk = await file.read(CHUNK)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="File exceeds 4 GB limit.")
+                fout.write(chunk)
+    except HTTPException:
+        saved_path.unlink(missing_ok=True)
+        raise
 
     video = Video(
         id=video_id,
