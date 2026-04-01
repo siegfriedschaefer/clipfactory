@@ -13,9 +13,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-_CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+_CASCADE_FRONTAL = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+_CASCADE_PROFILE = cv2.data.haarcascades + "haarcascade_profileface.xml"
 _TARGET_W = 1080
 _TARGET_H = 1920
+_SAMPLE_FRAMES = 8  # frames to sample per clip for face detection
 
 
 def _has_libass() -> bool:
@@ -31,27 +33,68 @@ def _has_libass() -> bool:
 # Face-based crop
 # ---------------------------------------------------------------------------
 
-def _detect_face_center_x(keyframes_dir: Path, shots: list[dict], start: float, end: float, frame_w: int) -> int:
-    """Return the best crop centre-x based on face detection across keyframes."""
-    cascade = cv2.CascadeClassifier(_CASCADE_PATH)
-    cx_values = []
+def _sample_frames_from_video(video_path: Path, start: float, end: float, n: int) -> list:
+    """Extract n evenly-spaced frames from [start, end] via ffmpeg → in-memory PNG."""
+    duration = end - start
+    step = duration / (n + 1)
+    frames = []
+    for i in range(1, n + 1):
+        t = start + i * step
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-ss", f"{t:.3f}",
+                "-i", str(video_path),
+                "-vframes", "1",
+                "-f", "image2pipe", "-vcodec", "png", "pipe:1",
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode == 0 and result.stdout:
+            arr = np.frombuffer(result.stdout, np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is not None:
+                frames.append(img)
+    return frames
 
-    for i, shot in enumerate(shots):
-        if shot["end_time"] <= start or shot["start_time"] >= end:
-            continue
-        kf = keyframes_dir / f"shot_{i:04d}.jpg"
-        if not kf.exists():
-            continue
-        img = cv2.imread(str(kf))
-        if img is None:
-            continue
+
+def _detect_face_center_x(video_path: Path, start: float, end: float, frame_w: int) -> int:
+    """Return the area-weighted face centre-x across sampled frames.
+
+    Samples _SAMPLE_FRAMES frames directly from the clip range, runs both
+    frontal and profile Haar cascades, and weights each detected face centre
+    by its pixel area so the largest (closest) face dominates.
+    Falls back to centre crop when no faces are found.
+    """
+    frontal = cv2.CascadeClassifier(_CASCADE_FRONTAL)
+    profile = cv2.CascadeClassifier(_CASCADE_PROFILE)
+
+    frames = _sample_frames_from_video(video_path, start, end, _SAMPLE_FRAMES)
+
+    weighted_sum = 0.0
+    total_area = 0.0
+
+    for img in frames:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
-        for (x, y, w, h) in faces:
-            cx_values.append(x + w // 2)
+        # Equalise histogram to improve detection in varied lighting
+        gray = cv2.equalizeHist(gray)
+        h_img = img.shape[0]
+        for cascade in (frontal, profile):
+            faces = cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.05,
+                minNeighbors=5,
+                minSize=(max(30, frame_w // 20), max(30, h_img // 20)),
+            )
+            for (x, y, w, h) in faces:
+                cx = x + w // 2
+                area = float(w * h)
+                weighted_sum += cx * area
+                total_area += area
 
-    if cx_values:
-        return int(np.median(cx_values))
+    if total_area > 0:
+        return int(weighted_sum / total_area)
     return frame_w // 2  # fallback: centre crop
 
 
@@ -132,7 +175,6 @@ def export_clip(
     start_time: float,
     end_time: float,
     transcript_segments: list[dict],
-    shots: list[dict],
     storage_root: Path,
     variant_type: str = "export",
 ) -> dict:
@@ -141,7 +183,6 @@ def export_clip(
     Returns a dict with file_path, srt_path, resolution.
     """
     video_path = storage_root / "videos" / str(video_id) / "normalized.mp4"
-    keyframes_dir = storage_root / "videos" / str(video_id) / "keyframes"
 
     out_dir = storage_root / "exports" / str(video_id)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -154,8 +195,8 @@ def export_clip(
     # 1. Probe source dimensions
     frame_w, frame_h = _probe_dimensions(video_path)
 
-    # 2. Compute crop
-    cx = _detect_face_center_x(keyframes_dir, shots, start_time, end_time, frame_w)
+    # 2. Compute crop — sample frames directly from the clip for accurate face centering
+    cx = _detect_face_center_x(video_path, start_time, end_time, frame_w)
     crop_x, crop_y, crop_w, crop_h = _compute_crop(frame_w, frame_h, cx)
 
     # 3. Generate SRT
@@ -200,12 +241,10 @@ def export_preview(
     candidate_id: uuid.UUID,
     start_time: float,
     end_time: float,
-    shots: list[dict],
     storage_root: Path,
 ) -> dict:
     """Produce a low-res 480x854 preview MP4 (no subtitles) for fast UI display."""
     video_path = storage_root / "videos" / str(video_id) / "normalized.mp4"
-    keyframes_dir = storage_root / "videos" / str(video_id) / "keyframes"
 
     out_dir = storage_root / "previews" / str(video_id)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -213,7 +252,7 @@ def export_preview(
 
     duration = end_time - start_time
     frame_w, frame_h = _probe_dimensions(video_path)
-    cx = _detect_face_center_x(keyframes_dir, shots, start_time, end_time, frame_w)
+    cx = _detect_face_center_x(video_path, start_time, end_time, frame_w)
     crop_x, crop_y, crop_w, crop_h = _compute_crop(frame_w, frame_h, cx)
 
     cmd = [

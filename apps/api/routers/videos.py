@@ -16,7 +16,7 @@ from apps.api.config import settings
 from apps.api.database import get_session
 from apps.api.models import (
     ClipCandidate, ClipFeedback, ClipScore, ClipVariant,
-    Job, JobStatus, Shot, TranscriptSegment, Video,
+    Job, JobStatus, TranscriptSegment, Video,
 )
 from services.storage import save_upload, video_dir
 
@@ -352,15 +352,6 @@ async def export_candidate(
         for s in segs_result.scalars().all()
     ]
 
-    # Load shots
-    shots_result = await session.execute(
-        select(Shot).where(Shot.video_id == video_id).order_by(Shot.shot_index)
-    )
-    shots = [
-        {"start_time": s.start_time, "end_time": s.end_time}
-        for s in shots_result.scalars().all()
-    ]
-
     # Load title suggestions from score
     score_result = await session.execute(
         select(ClipScore).where(ClipScore.candidate_id == candidate_id)
@@ -379,7 +370,6 @@ async def export_candidate(
             start_time=candidate.start_time,
             end_time=candidate.end_time,
             transcript_segments=segments,
-            shots=shots,
             storage_root=storage_root,
         ),
     )
