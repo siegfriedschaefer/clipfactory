@@ -210,7 +210,7 @@ def export_clip(
     if _has_libass():
         srt_escaped = str(srt_path).replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
         vf_parts.append(
-            f"subtitles='{srt_escaped}':force_style='FontSize=18,Outline=2,Shadow=1,Alignment=2'"
+            f"subtitles='{srt_escaped}':force_style='PlayResX=1080,PlayResY=1920,FontSize=42,Bold=1,Outline=2,Shadow=1,Alignment=2,MarginV=60'"
         )
 
     cmd = [
