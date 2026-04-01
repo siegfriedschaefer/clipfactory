@@ -31,7 +31,4 @@ API danach unter `http://localhost:8000/docs`.
 9. Feedback / Learning
 
 ## Nächste Schritte
-- WhisperX im GPU Worker integrieren
-- echte ffmpeg-Pipeline ergänzen
-- Shot Detection und Ranking verfeinern
-- Frontend anschließen
+- virale clip erkennung und croping verbessern.
