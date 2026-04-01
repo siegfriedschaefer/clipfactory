@@ -58,6 +58,14 @@ def process(payload: dict, session: Session, r: redis.Redis) -> None:
     video.fps = result["fps"]
     session.commit()
 
+    if result["chunk_paths"]:
+        logger.info(
+            "Video %s is %.0fs — split into %d audio chunks",
+            video_id, result["duration"], len(result["chunk_paths"]),
+        )
+    else:
+        logger.info("Video %s is %.0fs — single audio file", video_id, result["duration"])
+
     logger.info("Running shot detection for video %s", video_id)
     shots = run_shot_detection(video_id, result["normalized_path"])
     for shot in shots:

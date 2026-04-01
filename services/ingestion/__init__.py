@@ -5,6 +5,8 @@ from pathlib import Path
 
 from services.storage import video_dir
 
+CHUNK_DURATION = 900  # 15 minutes
+
 
 def probe_video(path: Path) -> dict:
     """Read duration, resolution and fps from a video file using ffprobe."""
@@ -57,6 +59,32 @@ def normalize_video(video_id: uuid.UUID, raw_path: Path) -> Path:
     return out_path
 
 
+def split_audio_into_chunks(video_id: uuid.UUID, normalized_path: Path, chunk_duration: int = CHUNK_DURATION) -> list[Path]:
+    """Split the normalized video's audio into chunk_duration-second WAV files.
+
+    Uses ffmpeg segment muxer so each chunk resets timestamps to zero.
+    Returns sorted list of chunk paths under audio_chunks/.
+    """
+    out_dir = video_dir(video_id) / "audio_chunks"
+    out_dir.mkdir(exist_ok=True)
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(normalized_path),
+        "-vn",
+        "-ar", "16000",
+        "-ac", "1",
+        "-sample_fmt", "s16",
+        "-f", "segment",
+        "-segment_time", str(chunk_duration),
+        "-reset_timestamps", "1",
+        str(out_dir / "chunk_%03d.wav"),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg audio chunking failed:\n{result.stderr}")
+    return sorted(out_dir.glob("chunk_*.wav"))
+
+
 def extract_audio(video_id: uuid.UUID, video_path: Path) -> Path:
     """Extract audio from a video file to a 16kHz mono WAV.
 
@@ -81,17 +109,31 @@ def extract_audio(video_id: uuid.UUID, video_path: Path) -> Path:
 
 
 def run_ingestion(video_id: uuid.UUID, raw_path: Path) -> dict:
-    """Full ingestion pipeline: probe → normalize → extract audio.
+    """Full ingestion pipeline: probe → normalize → extract audio (or split into chunks).
 
-    Returns a dict with duration, resolution, fps, normalized_path, audio_path.
+    For videos longer than CHUNK_DURATION seconds, audio is split into 15-minute
+    WAV chunks stored under audio_chunks/ instead of a single audio.wav.
+
+    Returns a dict with:
+      duration, resolution, fps, normalized_path,
+      audio_path (single WAV, or None if chunked),
+      chunk_paths (list of chunk WAVs, or [] if not chunked).
     """
     metadata = probe_video(raw_path)
     normalized_path = normalize_video(video_id, raw_path)
-    audio_path = extract_audio(video_id, normalized_path)
+
+    if metadata["duration"] and metadata["duration"] > CHUNK_DURATION:
+        chunk_paths = split_audio_into_chunks(video_id, normalized_path)
+        audio_path = None
+    else:
+        audio_path = extract_audio(video_id, normalized_path)
+        chunk_paths = []
+
     return {
         "duration": metadata["duration"],
         "resolution": metadata["resolution"],
         "fps": metadata["fps"],
         "normalized_path": normalized_path,
         "audio_path": audio_path,
+        "chunk_paths": chunk_paths,
     }

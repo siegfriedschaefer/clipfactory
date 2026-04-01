@@ -5,10 +5,10 @@
 ```text
                     ┌──────────────────────────┐
                     │      Frontend / UI       │
-                    │  Upload, Timeline, Rank  │
-                    │  (placeholder)           │
+                    │  Vite + React · Port 3000│
+                    │  Upload, Ranking, Export │
                     └────────────┬─────────────┘
-                                 │ HTTP
+                                 │ HTTP (nginx proxy)
                                  ▼
                     ┌──────────────────────────┐
                     │    API / Orchestrator    │
@@ -23,58 +23,63 @@
    │   worker_cpu     │ │     Redis      │ │   PostgreSQL   │
    │   ffmpeg         │ │   Job Queue    │ │   Metadata     │
    │   shot detect    │ │   Port 6379    │ │   Port 5432    │
-   └────────┬─────────┘ └────────────────┘ └────────────────┘
+   │   chunk split    │ └────────────────┘ └────────────────┘
+   └────────┬─────────┘
             │
             ▼
    ┌──────────────────┐
    │   worker_gpu     │
-   │   WhisperX ASR   │
-   │   (CUDA)         │
+   │   Moonshine ASR  │
+   │   per-chunk ASR  │
+   │   ts-stitching   │
    └────────┬─────────┘
             │
             ▼
    ┌──────────────────────────────┐
    │   Semantic Segmentation      │
-   │   Topic shifts, rhet. cuts   │
+   │   Pauses, rhetorical markers │
+   │   shot-aligned boundaries    │
    └────────┬─────────────────────┘
             │
             ▼
    ┌──────────────────────────────┐
    │   Candidate Generator        │
-   │   50–150 clip candidates     │
+   │   30–100 clip candidates     │
    └────────┬─────────────────────┘
             │
             ▼
    ┌──────────────────────────────┐
    │   Feature Extraction         │
-   │   text / audio / video /     │
-   │   channel signals            │
+   │   text (11) / audio (6) /    │
+   │   video (5) features         │
    └────────┬─────────────────────┘
             │
             ▼
    ┌──────────────────────────────┐
    │   Scoring Engine             │
    │   hook / retention / share   │
+   │   packaging / risk           │
    └────────┬─────────────────────┘
             │
             ▼
    ┌──────────────────────────────┐
    │   Meta Ranker                │
-   │   XGBoost / LightGBM         │
+   │   Weighted sum → viral_score │
+   │   Top-10 + reason tags       │
    └────────┬─────────────────────┘
             │
             ▼
    ┌──────────────────────────────┐
    │   Packaging Engine           │
-   │   subtitles, titles,         │
-   │   overlays, 9:16 export      │
+   │   9:16 crop (face-based)     │
+   │   SRT subtitles, 1080×1920   │
    └────────┬─────────────────────┘
             │
             ▼
    ┌──────────────────────────────┐
    │   Export + Feedback Store    │
-   │   publish metrics,           │
-   │   retraining data            │
+   │   clip_variants, clip_score  │
+   │   clip_feedback              │
    └──────────────────────────────┘
 ```
 
@@ -84,9 +89,10 @@
 
 | Service | Image | Port | Purpose |
 | --- | --- | --- | --- |
+| `frontend` | `Dockerfile.frontend` | 3000 | Vite/React SPA served by nginx; proxies `/videos` to api |
 | `api` | `Dockerfile.api` | 8000 | FastAPI app + Alembic migrations on startup |
-| `worker_cpu` | `Dockerfile.worker_cpu` | — | ffmpeg ingestion, shot detection |
-| `worker_gpu` | `Dockerfile.worker_gpu` | — | WhisperX ASR (NVIDIA GPU, 12 GB limit) |
+| `worker_cpu` | `Dockerfile.worker_cpu` | — | ffmpeg ingestion, shot detection, 15-min audio chunk splitting |
+| `worker_gpu` | `Dockerfile.worker_gpu` | — | Moonshine ASR (per chunk), timestamp stitching, segmentation, features, scoring |
 | `postgres` | `postgres:16-alpine` | 5432 | Primary database |
 | `redis` | `redis:7-alpine` | 6379 | Job queue |
 
@@ -96,11 +102,24 @@ All services share a `.env` file. `api`, `worker_cpu`, and `worker_gpu` depend o
 
 ```text
 storage/
-├── videos/     # uploaded source files
-├── clips/      # cut segments
-├── exports/    # final 9:16 shorts
-└── models/     # ML model cache
+├── videos/{video_id}/
+│   ├── normalized.mp4          # re-encoded source (always present)
+│   ├── audio.wav               # 16kHz mono WAV — only for videos ≤ 15 min
+│   ├── audio_chunks/           # only for videos > 15 min
+│   │   ├── chunk_000.wav       # first 15-min slice, 16kHz mono
+│   │   ├── chunk_001.wav       # second slice, etc.
+│   │   └── …
+│   └── keyframes/              # one JPG per shot
+├── exports/{video_id}/         # 9:16 MP4 + SRT per exported clip
+└── previews/{video_id}/        # 480×854 low-res preview MP4s
 ```
+
+**Chunked ingestion:** Videos longer than 15 minutes are split into 15-minute audio chunks (`CHUNK_DURATION = 900 s`) after normalization. The GPU worker detects the `audio_chunks/` directory, transcribes each chunk with Moonshine, offsets every segment's `start_time` / `end_time` by `chunk_index × CHUNK_DURATION`, then writes all segments to `transcript_segments` as if the video were continuous. The `normalized.mp4` is never split — ffmpeg trims the source during export using absolute timestamps.
+
+**ASR engine:** [Moonshine](https://github.com/usefulsensors/moonshine) (`moonshine-voice`).
+Runs on CPU by default; the GPU worker Dockerfile contains commented instructions to switch to a CUDA base image if a GPU is available.
+
+**Worker retry policy:** Both workers retry failed jobs up to 3 times before marking the job as `failed`. Retry count is stored in `jobs.retry_count`.
 
 ---
 
@@ -127,6 +146,7 @@ storage/
 | `video_id` | UUID FK→videos | indexed, cascade delete |
 | `status` | Enum | see below |
 | `error_message` | Text | nullable |
+| `retry_count` | Integer | default 0; incremented on each retry |
 | `created_at` | DateTime TZ | |
 | `updated_at` | DateTime TZ | auto-updated |
 
@@ -134,8 +154,8 @@ storage/
 
 ```text
 uploaded → ingesting → ready_for_asr → transcribing → transcribed
-                                    ↘
-                                      failed
+                                                     ↘
+                                                       failed
 ```
 
 ### `transcript_segments`
@@ -149,28 +169,125 @@ uploaded → ingesting → ready_for_asr → transcribing → transcribed
 | `start_time` | Float | seconds |
 | `end_time` | Float | seconds |
 | `text` | Text | transcribed words |
-| `words` | JSONB | word-level timing + confidence |
+| `words` | JSONB | word-level timing (None — not available in Moonshine non-streaming mode) |
 | `created_at` | DateTime TZ | |
+
+### `shots`
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID PK | |
+| `video_id` | UUID FK→videos | cascade delete |
+| `shot_index` | Integer | |
+| `start_time` / `end_time` | Float | seconds |
+| `start_frame` / `end_frame` | Integer | |
+| `keyframe_path` | String | nullable |
+
+### `semantic_segments`
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID PK | |
+| `video_id` | UUID FK→videos | cascade delete |
+| `segment_index` | Integer | |
+| `start_time` / `end_time` | Float | |
+| `trigger_type` | String(64) | pause \| topic_shift \| rhetorical \| shot_aligned |
+| `transcript_preview` | Text | nullable |
+
+### `clip_candidates`
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID PK | |
+| `video_id` | UUID FK→videos | cascade delete |
+| `candidate_index` | Integer | |
+| `start_time` / `end_time` / `duration` | Float | |
+| `candidate_type` | String(64) | hook_to_payoff \| quick_lesson \| … |
+| `trigger_marker` | String(64) | nullable |
+| `transcript_preview` | Text | nullable |
+| `status` | String(32) | active \| dismissed |
+
+### `clip_features`
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID PK | |
+| `candidate_id` | UUID FK→clip_candidates | cascade delete |
+| `feature_type` | String(16) | text \| audio \| video |
+| `feature_key` | String(64) | e.g. hook_strength |
+| `feature_value` | Float | normalised to [0, 1] except duration |
+| `computed_at` | DateTime TZ | |
+
+### `clip_scores`
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID PK | |
+| `candidate_id` | UUID FK→clip_candidates | unique, cascade delete |
+| `hook_score` | Float | [0, 1] |
+| `retention_score` | Float | [0, 1] |
+| `share_score` | Float | [0, 1] |
+| `packaging_score` | Float | [0, 1] |
+| `risk_score` | Float | [0, 1] higher = riskier |
+| `viral_score` | Float | weighted meta-score |
+| `rank` | Integer | nullable; 1 = best |
+| `reasons` | JSONB | list of 3–5 human-readable tags |
+| `computed_at` | DateTime TZ | |
+
+### `clip_variants`
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID PK | |
+| `candidate_id` | UUID FK→clip_candidates | cascade delete |
+| `variant_type` | String(16) | export \| preview |
+| `file_path` | String(1024) | |
+| `resolution` | String(32) | e.g. 1080x1920 |
+| `title_suggestions` | JSONB | nullable |
+| `overlay_text` | Text | nullable |
+| `subtitle_path` | String(1024) | nullable |
+| `created_at` | DateTime TZ | |
+
+### `clip_feedback`
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID PK | |
+| `candidate_id` | UUID FK→clip_candidates | cascade delete |
+| `video_id` | UUID FK→videos | cascade delete |
+| `action` | String(16) | positive \| negative \| exported |
+| `created_at` | DateTime TZ | |
+
+---
+
+## API Endpoints
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/health` | Liveness probe |
+| GET | `/ready` | Readiness probe (DB check) |
+| POST | `/videos` | Upload video, start pipeline |
+| GET | `/videos` | List all videos |
+| DELETE | `/videos/{id}` | Delete video + all artefacts |
+| GET | `/videos/{id}/status` | Current job status |
+| GET | `/videos/{id}/transcript` | All transcript segments |
+| GET | `/videos/{id}/candidates` | All clip candidates |
+| GET | `/videos/{id}/ranked-clips` | Top-10 ranked clips with scores + reasons |
+| POST | `/videos/{id}/candidates/{cid}/export` | Render 9:16 MP4 export |
+| GET | `/videos/{id}/exports` | List all exports for a video |
+| POST | `/videos/{id}/candidates/{cid}/feedback` | Submit positive/negative/exported feedback |
 
 ---
 
 ## AI Components
 
-### Prompts (`ai/prompts/`)
-
-| File | Purpose | Status |
-| --- | --- | --- |
-| `scoring.md` | Virality assessment — hook/retention/share scores | Done |
-| `segmentation.md` | Topic boundary detection | Stub |
-| `packaging.md` | Subtitle/title generation | Stub |
-
 ### Schemas (`ai/schemas/`)
 
 | File | Fields |
 | --- | --- |
-| `clip_candidate.json` | `clip_id`, `start`, `end`, `type`, `features` (hook_strength, novelty, clarity) |
+| `clip_candidate.json` | `clip_id`, `start`, `end`, `type`, `features` |
 | `clip_score.json` | `clip_id`, `hook_score`, `retention_score`, `share_score`, `viral_score`, `reasons` |
-| `video_metadata.json` | (stub) |
+| `video_metadata.json` | stub |
 
 ---
 
@@ -178,17 +295,24 @@ uploaded → ingesting → ready_for_asr → transcribing → transcribed
 
 | Component | Status |
 | --- | --- |
-| Docker Compose stack | Done |
-| PostgreSQL schema + Alembic | Done (no migrations generated yet) |
-| FastAPI skeleton + health checks | Done |
-| Pydantic config + env loading | Done |
-| CPU worker — ffmpeg ingestion | Stub |
-| GPU worker — WhisperX ASR | Stub |
-| Redis job queue integration | Stub |
-| Service modules (ingestion, asr, storage, jobs) | Stubs |
-| Semantic segmentation | Not started |
-| Candidate generator | Not started |
-| Scoring engine | Not started |
-| Meta ranker (XGBoost) | Not started |
-| Packaging engine | Not started |
-| Frontend | Placeholder |
+| Docker Compose stack (6 services) | Done |
+| PostgreSQL schema + Alembic migrations | Done |
+| FastAPI + health/ready endpoints | Done |
+| CPU worker — ffmpeg ingestion + shot detection | Done |
+| CPU worker — 15-min audio chunk splitting | Planned |
+| GPU worker — Moonshine ASR | Done |
+| GPU worker — per-chunk ASR + timestamp stitching | Planned |
+| Redis job queue + retry logic (3 attempts) | Done |
+| Semantic segmentation | Done |
+| Candidate generator | Done |
+| Text / audio / video feature extraction | Done |
+| Specialist scoring (5 scores) | Done |
+| Meta ranker — weighted sum + viral_score | Done |
+| Score explanations — reason tags | Done |
+| Ranking endpoint (Top-10) | Done |
+| Packaging engine — 9:16 crop + SRT | Done |
+| Export endpoint + clip_variants | Done |
+| Preview generation (480×854) | Done |
+| Feedback endpoint + clip_feedback | Done |
+| Vite + React frontend (5 views) | Done |
+| Structured JSON logging (all services) | Done |

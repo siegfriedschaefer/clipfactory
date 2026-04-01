@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from apps.api.models import ClipCandidate, ClipFeature, ClipScore, Job, JobStatus, SemanticSegment, Shot, TranscriptSegment, Video
 from services.asr import run_asr
+from services.ingestion import CHUNK_DURATION
 from services.audio_features import compute_audio_features
 from services.candidates import run_candidate_generation
 from services.features import compute_text_features
@@ -46,17 +47,43 @@ def process(payload: dict, session: Session) -> None:
         logger.warning("Job %s already in status %s — skipping", job_id, job.status)
         return
 
-    # Validate audio file exists
-    audio_path = Path(settings.storage_root) / "videos" / str(video_id) / "audio.wav"
-    if not audio_path.exists():
-        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+    # Determine audio source: chunked (> 15 min) or single file
+    video_storage = Path(settings.storage_root) / "videos" / str(video_id)
+    chunks_dir = video_storage / "audio_chunks"
+    audio_path = video_storage / "audio.wav"
+
+    if chunks_dir.exists():
+        chunk_paths = sorted(chunks_dir.glob("chunk_*.wav"))
+        if not chunk_paths:
+            raise FileNotFoundError(f"audio_chunks/ exists but contains no WAV files: {chunks_dir}")
+    elif audio_path.exists():
+        chunk_paths = []
+    else:
+        raise FileNotFoundError(f"No audio found for video {video_id} (checked audio.wav and audio_chunks/)")
 
     transition(job, JobStatus.transcribing)
     video.status = "transcribing"
     session.commit()
-    logger.info("Transcribing video %s", video_id)
 
-    segments = run_asr(video_id, audio_path)
+    if chunk_paths:
+        logger.info("Transcribing video %s in %d chunks", video_id, len(chunk_paths))
+        segments = []
+        global_index = 0
+        for i, chunk_path in enumerate(chunk_paths):
+            offset = i * CHUNK_DURATION
+            logger.info("  chunk %d/%d (offset %.0fs): %s", i + 1, len(chunk_paths), offset, chunk_path.name)
+            chunk_segs = run_asr(video_id, chunk_path)
+            for seg in chunk_segs:
+                seg["start_time"] += offset
+                seg["end_time"] += offset
+                seg["segment_index"] = global_index
+                global_index += 1
+            segments.extend(chunk_segs)
+        logger.info("Transcription complete — %d segments across %d chunks for video %s", len(segments), len(chunk_paths), video_id)
+    else:
+        logger.info("Transcribing video %s (single audio file)", video_id)
+        segments = run_asr(video_id, audio_path)
+        logger.info("Transcription complete — %d segments for video %s", len(segments), video_id)
 
     if not segments:
         raise ValueError(f"ASR returned empty transcript for video {video_id}")
@@ -132,6 +159,11 @@ def process(payload: dict, session: Session) -> None:
 
     keyframes_dir = Path(settings.storage_root) / "videos" / str(video_id) / "keyframes"
 
+    # audio_features needs a single WAV covering the full video.
+    # For chunked videos, use the first chunk as a proxy (loudness/pace are
+    # computed per-candidate using transcript timing, so this is acceptable).
+    audio_features_path = audio_path if audio_path and audio_path.exists() else chunk_paths[0]
+
     for db_candidate in db_candidates:
         candidate_dict = {
             "start_time": db_candidate.start_time,
@@ -140,7 +172,7 @@ def process(payload: dict, session: Session) -> None:
         }
         for key, value in compute_text_features(candidate_dict, segments).items():
             session.add(ClipFeature(candidate_id=db_candidate.id, feature_type="text", feature_key=key, feature_value=value))
-        for key, value in compute_audio_features(candidate_dict, segments, audio_path).items():
+        for key, value in compute_audio_features(candidate_dict, segments, audio_features_path).items():
             session.add(ClipFeature(candidate_id=db_candidate.id, feature_type="audio", feature_key=key, feature_value=value))
         for key, value in compute_video_features(candidate_dict, shots_data, keyframes_dir).items():
             session.add(ClipFeature(candidate_id=db_candidate.id, feature_type="video", feature_key=key, feature_value=value))
