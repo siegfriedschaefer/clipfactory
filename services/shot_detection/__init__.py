@@ -27,7 +27,7 @@ def run_shot_detection(video_id: uuid.UUID, video_path: Path) -> list[dict]:
 
     shots = []
     for i, (start, end) in enumerate(scenes):
-        keyframe_path = _extract_keyframe(video_path, start.get_frames(), i, keyframes_dir)
+        keyframe_path = _extract_keyframe(video_path, start.get_seconds(), i, keyframes_dir)
         shots.append({
             "shot_index": i,
             "start_time": round(start.get_seconds(), 3),
@@ -40,15 +40,19 @@ def run_shot_detection(video_id: uuid.UUID, video_path: Path) -> list[dict]:
     return shots
 
 
-def _extract_keyframe(video_path: Path, frame_number: int, shot_index: int, out_dir: Path) -> Path | None:
-    """Extract a single frame from the video using ffmpeg."""
+def _extract_keyframe(video_path: Path, timestamp: float, shot_index: int, out_dir: Path) -> Path | None:
+    """Extract a single frame at timestamp using fast input-side seeking.
+
+    Placing -ss before -i makes ffmpeg jump to the nearest GOP keyframe and
+    decode only a few frames to reach the target — no full-video decode needed.
+    """
     import subprocess
 
     out_path = out_dir / f"shot_{shot_index:04d}.jpg"
     cmd = [
         "ffmpeg", "-y",
+        "-ss", f"{timestamp:.3f}",
         "-i", str(video_path),
-        "-vf", f"select=eq(n\\,{frame_number})",
         "-vframes", "1",
         "-q:v", "3",
         str(out_path),
